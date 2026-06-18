@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Database
-    MONGODB_URL: str = "mongodb://admin:password123@localhost:27017/rag_db"
+    MONGODB_URL: str = "mongodb://admin:password123@localhost:27017/rag_db?authSource=admin"
     QDRANT_URL: str = "http://localhost:6333"
     REDIS_URL: str = "redis://localhost:6379/0"
 

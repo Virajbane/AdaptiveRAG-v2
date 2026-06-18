@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+  # MongoDB - Document and Chat Storage
+  mongodb:
+    image: mongo:7.0
+    container_name: rag-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: rag_db
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Qdrant - Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: curl -f http://localhost:6333/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis - Caching
+  redis:
+    image: redis:7.2-alpine
+    container_name: rag-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama - Local LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_MODELS: /root/.ollama/models
+    # Note: First run will download the model (takes time)
+    # Manually run: docker exec rag-ollama ollama pull nomic-embed-text
+    # And: docker exec rag-ollama ollama pull qwen2:7b
+
+volumes:
+  mongodb_data:
+  qdrant_data:
+  redis_data:
+  ollama_data:
+
+networks:
+  default:
+    name: rag-network
