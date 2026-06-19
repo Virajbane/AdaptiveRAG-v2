@@ -1,3 +1,4 @@
+// frontend/app/auth/login/page.jsx
 'use client';
 
 import { useState } from 'react';
@@ -11,8 +12,9 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handles the form submission when user clicks "Sign in"
+  const handleLogin = async (e) => {
+    e.preventDefault(); // stops the browser from doing a full page reload
     setError('');
     setLoading(true);
 
@@ -29,8 +31,8 @@ export default function LoginPage() {
       }
 
       const data = await response.json();
-      
-      // Save token to localStorage
+
+      // Save token to localStorage so the user stays logged in on refresh
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('user_id', data.user_id);
       localStorage.setItem('user_name', data.name);
@@ -38,7 +40,7 @@ export default function LoginPage() {
       // Redirect to dashboard
       router.push('/dashboard/chat');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -48,7 +50,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-red-900">
             RAG 2.0 System
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">

@@ -32,3 +32,9 @@ prometheus-client
 pytest
 pytest-asyncio
 httpx
+
+PyPDF2==3.0.1
+python-docx==0.8.11
+tiktoken==0.5.2
+reportlab==4.0.7
+qdrant-client==1.7.1

@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import router
 from app.db.mongodb.client import connect_to_mongo, close_mongo_connection
+# Add this import
+from app.api.v1.endpoints.documents import router as documents_router
+
+# Add this line with the other routers
+
 
 app = FastAPI(
     title="RAG 2.0 System API",
@@ -19,6 +24,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(documents_router)
 
 @app.on_event("startup")
 async def startup():

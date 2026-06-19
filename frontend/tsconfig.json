@@ -29,6 +29,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "components/document/FileUpload.jsx", "app/dashboard/documents/page.jsx", "components/auth/ProtectedRoute.jsx", "app/dashboard/layout.jsx", "app/page.jsx", "app/layout.jsx", "app/auth/login/page.jsx", "app/auth/register/page.jsx", "app/context/AuthContext.jsx"  ],
   "exclude": ["node_modules"]
 }

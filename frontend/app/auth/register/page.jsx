@@ -1,3 +1,4 @@
+// frontend/app/auth/register/page.jsx
 'use client';
 
 import { useState } from 'react';
@@ -13,7 +14,9 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const validatePassword = (pwd: string): { valid: boolean; message: string } => {
+  // Checks the password against the same rules the backend enforces.
+  // Returns a plain object: { valid: true/false, message: '...' }
+  const validatePassword = (pwd) => {
     if (pwd.length < 8) return { valid: false, message: 'Password must be at least 8 characters' };
     if (!/[A-Z]/.test(pwd)) return { valid: false, message: 'Password must contain uppercase letter' };
     if (!/[a-z]/.test(pwd)) return { valid: false, message: 'Password must contain lowercase letter' };
@@ -24,11 +27,12 @@ export default function RegisterPage() {
     return { valid: true, message: '' };
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
 
-    // Validate
+    // Validate on the frontend first, so the user gets instant feedback
+    // before we even talk to the backend
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -57,7 +61,7 @@ export default function RegisterPage() {
       // Registration successful, redirect to login
       router.push('/auth/login?registered=true');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
     }

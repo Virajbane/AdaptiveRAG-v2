@@ -1,22 +1,15 @@
+// app/context/AuthContext.jsx
+
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
 
-interface AuthContextType {
-  token: string | null;
-  userId: string | null;
-  userName: string | null;
-  login: (token: string, userId: string, userName: string) => void;
-  logout: () => void;
-  isAuthenticated: boolean;
-}
+const AuthContext = createContext(undefined);
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
+export function AuthProvider({ children }) {
+  const [token, setToken] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [userName, setUserName] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Load from localStorage on mount
@@ -30,10 +23,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserId(savedUserId);
       setUserName(savedUserName || '');
     }
+
     setIsLoading(false);
   }, []);
 
-  const login = (newToken: string, newUserId: string, newUserName: string) => {
+  const login = (newToken, newUserId, newUserName) => {
     localStorage.setItem('access_token', newToken);
     localStorage.setItem('user_id', newUserId);
     localStorage.setItem('user_name', newUserName);
@@ -71,8 +65,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
+
   if (!context) {
     throw new Error('useAuth must be used within AuthProvider');
   }
+
   return context;
 }
