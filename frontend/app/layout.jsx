@@ -1,5 +1,6 @@
 // app/layout.jsx
-import "./globals.css";
+import { Metadata } from 'next'
+import './globals.css'
 export const metadata = {
   title: 'RAG 2.0 System',
   description: 'Enterprise-grade Adaptive RAG',

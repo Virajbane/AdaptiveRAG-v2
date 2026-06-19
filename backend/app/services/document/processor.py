@@ -42,6 +42,14 @@ class DocumentProcessor:
         if not chunks:
             raise ValueError("No chunks generated from document")
         
+        for i, chunk in enumerate(chunks):
+            chunk["doc_id"] = doc_id
+            chunk["chunk_index"] = i
+
+        # Index chunks for keyword (BM25) search
+        from app.services.retrieval.keyword_search import keyword_manager
+        await keyword_manager.index_document(user_id, chunks)
+        
         # 3. Generate embeddings
         print(f"Generating embeddings for {len(chunks)} chunks...")
         chunk_texts = [c["text"] for c in chunks]

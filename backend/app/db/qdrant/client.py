@@ -81,9 +81,9 @@ class QdrantVectorDB:
         """
         Search for similar vectors (user-isolated)
         """
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter={
                 "must": [
                     {
@@ -94,16 +94,16 @@ class QdrantVectorDB:
             },
             limit=top_k
         )
-        
+
         return [
             {
-                "score": result.score,
-                "doc_id": result.payload["doc_id"],
-                "chunk_index": result.payload["chunk_index"],
-                "text": result.payload["chunk_text"],
-                "tokens": result.payload["tokens"]
+                "score": point.score,
+                "doc_id": point.payload["doc_id"],
+                "chunk_index": point.payload["chunk_index"],
+                "text": point.payload["chunk_text"],
+                "tokens": point.payload["tokens"]
             }
-            for result in results
+            for point in response.points
         ]
     
     async def delete_document_vectors(self, doc_id: str, user_id: str) -> int:
