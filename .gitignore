@@ -23,3 +23,13 @@ build/
 
 # VS Code
 .vscode/settings.json
+
+# Python virtual environment
+venv/
+backend/venv/
+*.pyc
+__pycache__/
+
+# Uploaded files
+backend/uploads/
+*.db
