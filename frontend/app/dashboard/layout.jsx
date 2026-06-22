@@ -1,16 +1,18 @@
 // frontend/app/dashboard/layout.jsx
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { AuthProvider } from '@/app/context/AuthContext';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
-// This is a special Next.js file: layout.jsx wraps every page inside
-// the "dashboard" folder automatically (documents, chat, settings, etc).
-//
-// AuthProvider makes the login token available to all pages inside.
-// ProtectedRoute then checks that token and redirects to login if missing.
-export default function DashboardLayout({ children }) {
+// Wraps every page under /dashboard with:
+// 1. AuthProvider - makes the login token available everywhere inside
+// 2. ProtectedRoute - redirects to login if not authenticated
+// 3. DashboardLayout - the navbar + sidebar shell around the page content
+export default function DashboardRootLayout({ children }) {
   return (
     <AuthProvider>
-      <ProtectedRoute>{children}</ProtectedRoute>
+      <ProtectedRoute>
+        <DashboardLayout>{children}</DashboardLayout>
+      </ProtectedRoute>
     </AuthProvider>
   );
 }

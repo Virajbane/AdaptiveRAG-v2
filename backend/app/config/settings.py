@@ -6,22 +6,25 @@ class Settings(BaseSettings):
     APP_NAME: str = "RAG 2.0 System"
     DEBUG: bool = True
 
-    # Database
-    MONGODB_URL: str = "mongodb://admin:password123@localhost:27017/rag_db?authSource=admin"
+    # Database — no hardcoded defaults, must come from .env
+    MONGODB_URL: str
     QDRANT_URL: str = "http://localhost:6333"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # LLM
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "qwen2:7b"
+    OLLAMA_MODEL: str = "qwen2.5:7b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # API Keys
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
 
-    # Security
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    # Tool APIs
+    TAVILY_API_KEY: str = ""
+
+    # Security — no hardcoded default, must come from .env
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
 
