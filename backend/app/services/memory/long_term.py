@@ -98,7 +98,18 @@ class LongTermMemory:
                 "type": "session_summary"
             }).sort("created_at", -1).limit(limit).to_list(length=limit)
             
-            return summaries
+            # Convert ObjectId and datetime to JSON-safe types
+            clean_summaries = []
+            for s in summaries:
+                clean_summaries.append({
+                    "id": str(s["_id"]),
+                    "session_id": s.get("session_id"),
+                    "summary": s.get("summary"),
+                    "topics": s.get("topics", []),
+                    "created_at": s["created_at"].isoformat() if s.get("created_at") else None
+                })
+            
+            return clean_summaries
         except Exception as e:
             print(f"Error getting summaries: {e}")
             return []

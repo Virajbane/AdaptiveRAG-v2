@@ -141,3 +141,41 @@ async def list_documents(
         })
     
     return {"documents": documents}
+
+@router.get("/list")
+async def list_documents(user_id: str = Depends(get_current_user)):
+    """
+    List all documents for current user
+    """
+    try:
+        db = await get_db()
+        
+        documents = await db["documents"].find(
+            {"user_id": user_id}
+        ).to_list(length=None)
+        
+        result = []
+        for doc in documents:
+            # Count chunks for this document
+            chunk_count = await db["document_chunks"].count_documents(
+                {"document_id": str(doc["_id"])}
+            )
+            
+            result.append({
+                "id": str(doc["_id"]),
+                "filename": doc.get("filename"),
+                "size": doc.get("size"),
+                "chunks": chunk_count,
+                "created_at": doc.get("created_at"),
+                "content_type": doc.get("content_type")
+            })
+        
+        return {
+            "documents": result,
+            "count": len(result)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error listing documents: {str(e)}"
+        )

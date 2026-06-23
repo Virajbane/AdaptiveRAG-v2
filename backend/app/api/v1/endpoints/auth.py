@@ -7,6 +7,7 @@ from app.services.auth_service import JWTService
 from app.config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.middleware.auth import get_current_user
+from bson import ObjectId
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -108,3 +109,32 @@ async def get_me(
         "name": user["name"],
         "created_at": user["created_at"]
     }
+
+@router.get("/me")
+async def get_current_user_profile(
+    user_id: str = Depends(get_current_user)
+):
+    """
+    Get current user profile
+    """
+    try:
+        db = await get_db()
+        user = await db["users"].find_one({"_id": ObjectId(user_id)})
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        return {
+            "user_id": str(user["_id"]),
+            "email": user["email"],
+            "created_at": user.get("created_at"),
+            "updated_at": user.get("updated_at")
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching user: {str(e)}"
+        )

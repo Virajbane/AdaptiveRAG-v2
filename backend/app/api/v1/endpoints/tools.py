@@ -18,7 +18,9 @@ class CalculateRequest(BaseModel):
     expression: str
 
 class WebSearchRequest(BaseModel):
+    """Web search request"""
     query: str
+    max_results: int = 5
 
 @router.get("/available")
 async def list_tools(user_id: str = Depends(get_current_user)):
@@ -88,11 +90,26 @@ async def web_search(
     request: WebSearchRequest,
     user_id: str = Depends(get_current_user)
 ):
+    """
+    Quick web search endpoint
+    """
+    
     from app.services.tools.web_search import web_search_tool
+    
     if not web_search_tool:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Web search not available")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Web search not available"
+        )
+    
     try:
-        result = await web_search_tool.search(request.query, max_results=5)
+        result = await web_search_tool.search(
+            request.query,
+            max_results=request.max_results
+        )
         return result
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Search failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}"
+        )
