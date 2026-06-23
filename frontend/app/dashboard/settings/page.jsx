@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useAuth } from '@/app/context/AuthContext';
 
 export default function SettingsPage() {
-  const router = useRouter();
+  const { token, logout } = useAuth();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [error, setError] = useState('');
@@ -16,18 +16,13 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
-    loadUserProfile();
-  }, []);
+    if (token) {
+      loadUserProfile();
+    }
+  }, [token]);
 
   const loadUserProfile = async () => {
     try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        router.push('/auth/login');
-        return;
-      }
-
       const res = await fetch('http://localhost:8000/api/v1/auth/me', {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -40,9 +35,8 @@ export default function SettingsPage() {
 
       const data = await res.json();
       setUser(data);
-      
-      // Load settings from localStorage
-      const savedSettings = localStorage.getItem('settings');
+
+      const savedSettings = localStorage.getItem('app_settings');
       if (savedSettings) {
         setSettings(JSON.parse(savedSettings));
       }
@@ -55,14 +49,12 @@ export default function SettingsPage() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/auth/login');
+    logout();
   };
 
   const saveSettings = () => {
     try {
-      localStorage.setItem('settings', JSON.stringify(settings));
+      localStorage.setItem('app_settings', JSON.stringify(settings));
       setSuccess('Settings saved successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -73,13 +65,11 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-2xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Settings</h1>
           <p className="text-gray-600">Manage your account and preferences</p>
         </div>
 
-        {/* Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-lg mb-8">
             {error}
@@ -91,7 +81,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -101,10 +90,9 @@ export default function SettingsPage() {
 
         {!loading && user && (
           <>
-            {/* Profile Section */}
             <div className="bg-white rounded-lg shadow p-8 mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Profile</h2>
-              
+
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -144,10 +132,9 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Preferences Section */}
             <div className="bg-white rounded-lg shadow p-8 mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Preferences</h2>
-              
+
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -200,7 +187,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Danger Zone */}
             <div className="bg-red-50 border border-red-200 rounded-lg p-8">
               <h2 className="text-2xl font-bold text-red-900 mb-4">Danger Zone</h2>
               <p className="text-red-800 mb-6">
