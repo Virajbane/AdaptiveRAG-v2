@@ -7,6 +7,11 @@ from app.services.memory.manager import MemoryManager
 import app.services.memory.manager as mm_module
 from app.services.tools.web_search import init_web_search
 from app.config.settings import settings
+from app.utils.health_checks import get_system_health
+from app.middleware.logging import LoggingMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.audit_log import AuditLoggingMiddleware
     
    
 
@@ -23,6 +28,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuditLoggingMiddleware)
+# Add logging middleware
+app.add_middleware(LoggingMiddleware)
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check of all services"""
+    return await get_system_health()
 
 @app.on_event("startup")
 async def startup():

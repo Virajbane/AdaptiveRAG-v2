@@ -1,35 +1,158 @@
+```gitignore
+# ===========================================
 # Python
+# ===========================================
 __pycache__/
 *.py[cod]
-*.class
+*$py.class
+*.pyo
+*.pyd
 
-# Environment variables
+
+# Generated project files
+project_tree.txt
+
+# Python
+.python-version
+pip-wheel-metadata/
+
+# Environment
+.env.*
+
+# Vercel / Turbopack
+.vercel/
+.turbo/
+
+# Temporary
+*.orig
+.history/
+
+project_tree.txt
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+backend/venv/
+frontend/venv/
+
+# Pytest
+.pytest_cache/
+.cache/
+
+
+# Coverage
+.coverage
+coverage/
+coverage.xml
+htmlcov/
+.pytest_results.xml
+
+# Type Checkers
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ===========================================
+# Environment Files
+# ===========================================
 .env
 .env.local
+.env.development
+.env.production
+.env.test
 
-# Node.js
+backend/.env
+frontend/.env
+
+# Keep examples
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ===========================================
+# Logs
+# ===========================================
+logs/
+*.log
+backend/logs/
+
+# ===========================================
+# Build
+# ===========================================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ===========================================
+# VS Code / IDE
+# ===========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===========================================
+# macOS / Windows
+# ===========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===========================================
+# Node / Next.js
+# ===========================================
 node_modules/
 .next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Build files
-dist/
-build/
+# ===========================================
+# Docker
+# ===========================================
+docker-compose.override.yml
 
-# OS files
-.DS_Store
-
-# Logs
-*.log
-
-# VS Code
-.vscode/settings.json
-
-# Python virtual environment
-venv/
-backend/venv/
-*.pyc
-__pycache__/
-
-# Uploaded files
-backend/uploads/
+# ===========================================
+# Database
+# ===========================================
+*.sqlite
+*.sqlite3
 *.db
+
+# ===========================================
+# Secrets
+# ===========================================
+*.pem
+*.key
+*.crt
+
+# ===========================================
+# Misc
+# ===========================================
+tmp/
+temp/
+*.tmp
+*.bak
+
+# ===========================================
+# AI / Vector DB
+# ===========================================
+# AI / Vector databases
+qdrant_storage/
+chroma/
+chromadb/
+faiss_index/
+vector_store/
+
+# Uploaded documents
+uploads/
+data/uploads/

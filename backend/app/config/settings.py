@@ -2,36 +2,46 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
-    # App
+    # ==================== APP ====================
     APP_NAME: str = "RAG 2.0 System"
     DEBUG: bool = True
 
-    # Database — no hardcoded defaults, must come from .env
-    MONGODB_URL: str
+    # ==================== DATABASE ====================
+    MONGODB_URL: str  # Required from .env
     QDRANT_URL: str = "http://localhost:6333"
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # LLM
+    # ==================== LLM ====================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
-    # API Keys
+    # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
-
-    # Tool APIs
     TAVILY_API_KEY: str = ""
 
-    # Security — no hardcoded default, must come from .env
-    SECRET_KEY: str
+    # ==================== SECURITY ====================
+    SECRET_KEY: str  # Required from .env
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
+    
+    # NEW PHASE 10 SECURITY FIELDS
+    ENCRYPTION_KEY: str = "default-change-in-production"
+    ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+    PASSWORD_MIN_LENGTH: int = 8
+    PASSWORD_REQUIRE_UPPERCASE: bool = True
+    PASSWORD_REQUIRE_LOWERCASE: bool = True
+    PASSWORD_REQUIRE_DIGITS: bool = True
+    PASSWORD_REQUIRE_SPECIAL: bool = True
 
-    # CORS
+    # ==================== CORS ====================
     FRONTEND_URL: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
 
     class Config:
         env_file = ".env"
+        extra = "allow"  # Allow extra fields from .env
 
 settings = Settings()

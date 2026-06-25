@@ -1,4 +1,4 @@
-from rank_bm25 import BM25Okapi
+from rank_bm25 import BM25Plus
 from typing import List
 import re
 
@@ -33,8 +33,9 @@ class KeywordSearchEngine:
                 'text': chunk['text']
             })
         
-        # Build BM25 index
-        self.bm25 = BM25Okapi(tokenized_chunks)
+        # Build BM25 index (BM25Plus: IDF floor via delta, so small
+        # corpora don't collapse exact matches to a zero/negative score)
+        self.bm25 = BM25Plus(tokenized_chunks)
     
     def search(self, query: str, top_k: int = 10) -> List[dict]:
         """
@@ -66,7 +67,7 @@ class KeywordSearchEngine:
         # Build results
         results = []
         for idx in top_indices:
-            if scores[idx] != 0:  # Only include if score > 0
+            if scores[idx] > 0:  # Only include genuinely positive relevance
                 results.append({
                     'doc_id': self.doc_ids[idx]['doc_id'],
                     'chunk_index': self.doc_ids[idx]['chunk_index'],

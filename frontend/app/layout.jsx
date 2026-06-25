@@ -1,5 +1,6 @@
 // app/layout.jsx
 import { Metadata } from 'next'
+import { AuthProvider } from "@/app/context/AuthContext";
 import './globals.css'
 export const metadata = {
   title: 'RAG 2.0 System',
@@ -9,7 +10,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>{children}</body>
+      <body><AuthProvider>{children}</AuthProvider></body>
     </html>
   );
 }

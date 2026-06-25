@@ -1,21 +1,35 @@
 // frontend/app/auth/login/page.jsx
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { validateEmail } from '@/config/security';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Handles the form submission when user clicks "Sign in"
+  useEffect(() => {
+    if (searchParams.get('session_expired') === 'true') {
+      setError('Your session expired. Please sign in again.');
+    }
+  }, [searchParams]);
+
   const handleLogin = async (e) => {
-    e.preventDefault(); // stops the browser from doing a full page reload
+    e.preventDefault();
     setError('');
+
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -26,19 +40,21 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error('Too many login attempts. Please try again later.');
+        }
         const data = await response.json();
         throw new Error(data.detail || 'Login failed');
       }
 
       const data = await response.json();
 
-      // Save token to localStorage so the user stays logged in on refresh
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('user_id', data.user_id);
       localStorage.setItem('user_name', data.name);
 
-      // Redirect to dashboard
-      router.push('/dashboard/chat');
+      const redirect = searchParams.get('redirect') || '/dashboard/chat';
+      router.push(redirect);
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {

@@ -1,122 +1,150 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from app.db.mongodb.models import UserCreate, UserResponse
-from app.db.mongodb.queries import UserQueries
-from app.services.password_service import PasswordService
-from app.services.auth_service import JWTService
-from app.config.settings import settings
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.db.mongodb.client import get_db
 from app.middleware.auth import get_current_user
+from datetime import datetime
+from app.utils.validators import InputValidator
 from bson import ObjectId
+import bcrypt
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-async def get_db() -> AsyncIOMotorDatabase:
-    from app.db.mongodb.client import db
-    return db
-
-class TokenResponse(BaseModel):
-    user_id: str
+# Pydantic models
+class RegisterRequest(BaseModel):
     email: str
-    name: str
-    access_token: str
-    token_type: str
-    expires_in: int
+    password: str
 
 class LoginRequest(BaseModel):
     email: str
     password: str
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: AsyncIOMotorDatabase = Depends(get_db)):
-    # Validate password strength
-    is_strong, message = PasswordService.is_strong_password(user_data.password)
-    if not is_strong:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+# ============================================
+# REGISTER ENDPOINT - WITH INPUT VALIDATION
+# ============================================
 
-    # Check if user already exists
-    user_queries = UserQueries(db)
-    if await user_queries.user_exists(user_data.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+@router.post("/register")
+async def register(request: RegisterRequest):
+    """
+    Register new user with validation
+    
+    Validates:
+    - Email format
+    - Password strength
+    """
+    try:
+        # 1. VALIDATE EMAIL FORMAT
+        email = InputValidator.validate_email(request.email)
+        
+        # 2. VALIDATE PASSWORD STRENGTH
+        password = InputValidator.validate_password(request.password)
+        
+        # 3. GET DATABASE
+        db = await get_db()
+        
+       # 4. CHECK IF USER EXISTS
+        existing_user = await db["users"].find_one({"email": email})
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered"
+            )
+        
+        # 5. HASH PASSWORD
+        hashed_password = bcrypt.hashpw(
+            password.encode('utf-8'),
+            bcrypt.gensalt(rounds=12)
+        ).decode('utf-8')
+        
+        # 6. CREATE USER DOCUMENT
+        user_data = {
+            "email": email,
+            "password_hash": hashed_password,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "is_active": True
+        }
+        
+        # 7. INSERT INTO DATABASE
+        result = await db["users"].insert_one(user_data)
+        user_id = str(result.inserted_id)
+        
+        return {
+            "user_id": user_id,
+            "email": email,
+            "message": "User registered successfully"
+        }
+    
+    except HTTPException:
+        # Re-raise validation errors
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}"
+        )
 
-    # Hash password and create user
-    password_hash = PasswordService.hash_password(user_data.password)
-    user_id = await user_queries.create_user(
-        email=user_data.email,
-        name=user_data.name,
-        password_hash=password_hash
-    )
+# ============================================
+# LOGIN ENDPOINT
+# ============================================
 
-    user = await user_queries.get_user_by_id(user_id)
+@router.post("/login")
+async def login(request: LoginRequest):
+    """
+    Login user with email and password
+    """
+    try:
+        # 1. VALIDATE EMAIL FORMAT
+        email = InputValidator.validate_email(request.email)
+        
+        # 2. GET DATABASE
+        db = await get_db()
+        
+        # 3. FIND USER
+        user = await db["users"].find_one({"email": email})
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # 4. VERIFY PASSWORD
+        if not bcrypt.checkpw(
+            request.password.encode('utf-8'),
+            user["password_hash"].encode('utf-8')
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # 5. GENERATE TOKEN
+        from app.services.auth_service import JWTService
+        access_token = JWTService.create_access_token(
+            user_id=str(user["_id"])
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user_id": str(user["_id"]),
+            "email": user["email"]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
 
-    return {
-        "user_id": str(user["_id"]),
-        "email": user["email"],
-        "name": user["name"],
-        "created_at": user["created_at"]
-    }
-
-@router.post("/login", response_model=TokenResponse)
-async def login(credentials: LoginRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
-    user_queries = UserQueries(db)
-
-    # Get user by email
-    user = await user_queries.get_user_by_email(credentials.email)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    # Verify password
-    if not PasswordService.verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    # Check active
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
-
-    # Create token
-    access_token = JWTService.create_access_token(
-        user_id=str(user["_id"]),
-        expires_in_hours=24
-    )
-
-    return {
-        "user_id": str(user["_id"]),
-        "email": user["email"],
-        "name": user["name"],
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": 86400
-    }
-
-@router.get("/users/me")
-async def get_me(db: AsyncIOMotorDatabase = Depends(get_db)):
-    return {"message": "protected route - coming soon"}
-
-user_router = APIRouter(prefix="/users", tags=["users"])
-
-@user_router.get("/me")
-async def get_me(
-    user_id: str = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db)
-):
-    user_queries = UserQueries(db)
-    user = await user_queries.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return {
-        "user_id": str(user["_id"]),
-        "email": user["email"],
-        "name": user["name"],
-        "created_at": user["created_at"]
-    }
+# ============================================
+# GET CURRENT USER PROFILE
+# ============================================
 
 @router.get("/me")
-async def get_current_user_profile(
-    user_id: str = Depends(get_current_user)
-):
-    """
-    Get current user profile
-    """
+async def get_profile(user_id: str = Depends(get_current_user)):
+    """Get current user profile"""
     try:
         db = await get_db()
         user = await db["users"].find_one({"_id": ObjectId(user_id)})
@@ -133,6 +161,9 @@ async def get_current_user_profile(
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at")
         }
+    
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

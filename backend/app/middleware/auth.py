@@ -1,6 +1,7 @@
 from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.services.auth_service import JWTService
+from app.utils.validators import InputValidator
 
 security = HTTPBearer()
 
@@ -38,3 +39,4 @@ async def get_current_user(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e)
         )
+    
