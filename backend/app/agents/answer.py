@@ -2,40 +2,48 @@ from app.agents.base import BaseAgent
 from app.agents.state import AgentState
 from app.agents.prompts import ANSWER_PROMPT
 
+
 class AnswerAgent(BaseAgent):
     """
     Answer Agent: Generates final response
 
     CRITICAL FIXES:
     1. Sources ONLY from real retrieved_docs (never LLM-invented)
-    2. Confidence calculation - fixed operator precedence
-    3. LLM asked for PLAIN TEXT only, no JSON - local models were
-       inconsistently malforming the JSON contract (missing commas,
-       double-nesting, "Sources:" instead of "sources":, etc.) across
-       different calls. Since sources never came from the LLM's JSON
-       anyway (see FIX #2), there was no reason to ask for it in JSON
-       in the first place - this removes that whole failure surface.
+    2. Confidence calculation fixed
+    3. Plain text output from LLM
+    4. Performance optimization:
+       - Only top 3 docs sent to LLM
+       - Only first 300 chars of each doc
     """
 
     async def _execute(self, state: AgentState) -> AgentState:
         """Generate final answer with citations"""
 
-        # FIX #1: Check if we have ANY real documents
+        # No documents found
         if not state.retrieved_docs:
             state.answer = (
                 "I don't have any documents to search. "
                 "Please upload documents first, then ask your question."
             )
             state.sources = []
-            state.confidence_final = state.confidence * 0.3  # Low confidence
+            state.confidence_final = state.confidence * 0.3
+
             print("[ANSWER] No documents - returning explicit message")
             return state
 
-        # Format context from REAL retrieved documents only
+        # --------------------------------------------------
+        # PERFORMANCE OPTIMIZATION
+        # Use only Top-3 retrieved documents
+        # Truncate each to 300 characters
+        # --------------------------------------------------
+        top_docs = state.retrieved_docs[:3]
+
         context = "\n".join([
-            f"[{i}] {doc['text']}"
-            for i, doc in enumerate(state.retrieved_docs, 1)
+            f"[{i}] {doc['text'][:300]}..."
+            for i, doc in enumerate(top_docs, 1)
         ])
+
+        print(f"[ANSWER] Using {len(top_docs)} top documents")
 
         try:
             prompt = ANSWER_PROMPT.format(
@@ -43,38 +51,34 @@ class AnswerAgent(BaseAgent):
                 context=context
             )
 
-            # FIX #3: plain text in, plain text out - no JSON parsing needed
+            # Generate answer
             response = await self.call_llm(prompt)
             state.answer = response.strip()
 
-            # FIX #2: Sources ONLY from REAL retrieved_docs
-            # NEVER use LLM's invented JSON sources - they hallucinate
+            # Sources from REAL retrieved docs
             state.sources = [
                 {
-                    "doc_id": doc['doc_id'],
-                    "chunk_index": doc['chunk_index'],
-                    "text": doc['text'][:200],
-                    "score": doc['combined_score']
+                    "doc_id": doc["doc_id"],
+                    "chunk_index": doc["chunk_index"],
+                    "text": doc["text"][:200],
+                    "score": doc["combined_score"],
                 }
                 for doc in state.retrieved_docs
             ]
 
-            # FIX #3: Confidence calculation - FIXED operator precedence
-            # Guarded if/else instead of ternary to avoid precedence bug
-            if state.retrieved_docs:
-                avg_doc_score = sum(
-                    doc['combined_score'] for doc in state.retrieved_docs
-                ) / len(state.retrieved_docs)
-                state.confidence_final = (
-                    state.confidence * 0.5 +  # Planner confidence
-                    avg_doc_score * 0.5        # Document match quality
-                )
-            else:
-                state.confidence_final = state.confidence * 0.3
+            # Confidence calculation
+            avg_doc_score = (
+                sum(doc["combined_score"] for doc in state.retrieved_docs)
+                / len(state.retrieved_docs)
+            )
 
-            state.confidence_final = min(state.confidence_final, 1.0)
+            state.confidence_final = min(
+                state.confidence * 0.5 +
+                avg_doc_score * 0.5,
+                1.0
+            )
 
-            print(f"[ANSWER] Generated response with {len(state.sources)} real sources")
+            print(f"[ANSWER] Generated response with {len(state.sources)} sources")
             print(f"[ANSWER] Confidence: {state.confidence_final:.2f}")
 
         except Exception as e:

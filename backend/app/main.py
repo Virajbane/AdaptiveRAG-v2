@@ -12,6 +12,7 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.audit_log import AuditLoggingMiddleware
+from app.middleware.timeout import TimeoutMiddleware
     
    
 
@@ -31,6 +32,8 @@ app.add_middleware(
 
 # Security middlewares
 app.add_middleware(SecurityHeadersMiddleware)
+# Timeout protection
+app.add_middleware(TimeoutMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuditLoggingMiddleware)
 # Add logging middleware

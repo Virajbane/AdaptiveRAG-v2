@@ -11,6 +11,10 @@ class AgentState:
     - Destroyed after response is sent
     - NOT persisted to database
     """
+    def copy(self):
+        """Create a copy of the state"""
+        from dataclasses import replace
+        return replace(self)
     
     # Input
     question: str
