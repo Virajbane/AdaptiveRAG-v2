@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # MongoDB
@@ -126,7 +126,7 @@ services:
   # Backend
   backend:
     image: ${DOCKER_REGISTRY}/rag-backend:${IMAGE_TAG:-latest}
-    container_name: rag-backend
+    
     environment:
       MONGODB_URL: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/rag_db?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
