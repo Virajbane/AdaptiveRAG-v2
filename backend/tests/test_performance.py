@@ -1,8 +1,35 @@
 import pytest
+import pytest_asyncio
 import asyncio
 import time
 from app.agents.orchestrator import AgentOrchestrator
+from app.services.memory.redis_client import redis_client
 from unittest.mock import AsyncMock, patch, MagicMock
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def ensure_redis_connected():
+    """
+    test_query_cache_hit and test_cache_expiry call query_cache directly,
+    with no app startup involved - ASGITransport (used in conftest.py's
+    `client` fixture) does not fire FastAPI's @app.on_event("startup")
+    lifecycle, and these two tests don't even use the `client` fixture
+    anyway, so redis_client.connect() never ran before them.
+
+    Without this fixture, redis_client.redis stays None, and every cache
+    get/set silently no-ops (by design, for graceful degradation in
+    production if Redis is briefly unavailable) - which surfaced as
+    `assert None is not None` rather than a clear connection error.
+
+    This fixture is autouse and file-scoped (applies to every test in
+    this file), but is a cheap no-op for tests that don't touch Redis,
+    since it only calls connect() if there isn't already a live
+    connection.
+    """
+    if not redis_client.redis:
+        await redis_client.connect()
+    yield
+
 
 class TestPerformance:
     """Performance tests for agent system"""
@@ -85,7 +112,7 @@ class TestPerformance:
         from app.services.cache.query_cache import query_cache
         
         # Clear cache first
-        query_cache.clear()
+        await query_cache.clear()
         
         question = "What is machine learning?"
         user_id = "test_user"
@@ -96,16 +123,24 @@ class TestPerformance:
         }
         
         # Store result
-        query_cache.set(question, user_id, result)
+        await query_cache.set(question, user_id, result)
         
-        # Retrieve (should be instant)
+        # Retrieve (should be fast - Redis round-trip, not instant like
+        # the old in-memory dict, so the assertion threshold below is
+        # relaxed accordingly)
         start = time.time()
-        cached = query_cache.get(question, user_id)
+        cached = await query_cache.get(question, user_id)
         elapsed = time.time() - start
         
         assert cached is not None
         assert cached["answer"] == result["answer"]
-        assert elapsed < 0.001, f"Cache lookup too slow: {elapsed*1000:.2f}ms"
+        # NOTE: threshold relaxed from 1ms to 50ms after the Phase 14
+        # Redis migration. The old in-memory dict lookup was sub-millisecond
+        # by definition (no network involved). A Redis GET is a real network
+        # round-trip (even to localhost/a sidecar container), so asserting
+        # <1ms here would be testing infrastructure speed, not application
+        # logic, and would be flaky depending on machine/CI runner load.
+        assert elapsed < 0.05, f"Cache lookup too slow: {elapsed*1000:.2f}ms"
         print(f"✅ Cache hit: {elapsed*1000:.2f}ms")
     
     @pytest.mark.asyncio
@@ -121,16 +156,18 @@ class TestPerformance:
         result = {"answer": "test"}
         
         # Store result
-        cache.set(question, user_id, result)
+        await cache.set(question, user_id, result)
         
         # Should be available immediately
-        assert cache.get(question, user_id) is not None
+        assert await cache.get(question, user_id) is not None
         
-        # Wait for expiry
+        # Wait for expiry (Redis enforces this natively via SETEX,
+        # set inside QueryCache.set() - no manual expiry bookkeeping
+        # in this class anymore)
         await asyncio.sleep(1.1)
         
         # Should be gone
-        assert cache.get(question, user_id) is None
+        assert await cache.get(question, user_id) is None
         print("✅ Cache expiry works")
     
     @pytest.mark.asyncio

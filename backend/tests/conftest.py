@@ -17,12 +17,24 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.main import app
 import app.db.mongodb.client as mongo_client_module
 
-@pytest.fixture(autouse=True)
-def clear_query_cache():
-    """Ensure no cached results leak between tests"""
-    query_cache.clear()
+@pytest_asyncio.fixture(autouse=True)
+async def clear_query_cache():
+    """
+    Ensure no cached results leak between tests.
+
+    NOTE: query_cache.clear() became async after the Phase 14 migration
+    to a Redis-backed cache (it now scans/deletes keys over the network
+    instead of clearing a local dict). This fixture was changed from a
+    plain @pytest.fixture/def to @pytest_asyncio.fixture/async def to
+    match - calling an async method without awaiting it doesn't raise
+    an error, it just silently returns an un-run coroutine, which is
+    exactly what happened before this fix (visible as a
+    'RuntimeWarning: coroutine QueryCache.clear was never awaited' in
+    the test output, with the cache never actually being cleared).
+    """
+    await query_cache.clear()
     yield
-    query_cache.clear()
+    await query_cache.clear()
 
 TEST_MONGO_URL = "mongodb://admin:password123@localhost:27017/rag_db_test?authSource=admin"
 TEST_DB_NAME = "rag_db_test"
