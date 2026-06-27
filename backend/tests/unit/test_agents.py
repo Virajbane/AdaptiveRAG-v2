@@ -698,12 +698,16 @@ class TestAgentOrchestrator:
             return state
 
         orch.planner.run = AsyncMock(side_effect=planner_error)
-        orch.retriever.run = AsyncMock()  # must NOT be called
+        orch.retriever.run = AsyncMock(side_effect=lambda state: state)
 
         with patch("app.services.memory.manager.memory_manager", None):
             result = await orch.process("q", "u-1")
 
-        orch.retriever.run.assert_not_called()
+        # Planner + Retriever run in parallel (Phase 11 optimization),
+        # so retriever DOES start even when planner errors.
+        # The orchestrator still correctly surfaces the planner error
+        # in the final result rather than proceeding with a normal answer.
+        orch.retriever.run.assert_called_once()
         assert "Error" in result["answer"]
         assert result["confidence"] == 0.0
         assert result["is_valid"] is False

@@ -10,11 +10,19 @@ it afterward.
 
 import pytest
 import pytest_asyncio
+from app.services.cache.query_cache import query_cache
 from httpx import AsyncClient, ASGITransport
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.main import app
 import app.db.mongodb.client as mongo_client_module
+
+@pytest.fixture(autouse=True)
+def clear_query_cache():
+    """Ensure no cached results leak between tests"""
+    query_cache.clear()
+    yield
+    query_cache.clear()
 
 TEST_MONGO_URL = "mongodb://admin:password123@localhost:27017/rag_db_test?authSource=admin"
 TEST_DB_NAME = "rag_db_test"

@@ -21,8 +21,8 @@ class ToolAgent(BaseAgent):
             return state
         
         try:
-            # For now, use web search if web is needed
-            if "web" in state.sources_needed:
+    # For now, use web search if web or tools is needed
+            if "web" in state.sources_needed or "tools" in state.sources_needed:
                 print("[TOOL] Executing web search...")
                 
                 result = await tool_registry.execute_tool(
@@ -33,9 +33,9 @@ class ToolAgent(BaseAgent):
                 
                 state.tool_results["web_search"] = result
                 print(f"[TOOL] Web search complete: {result.get('count', 0)} results")
-        
+
         except Exception as e:
             print(f"[TOOL] Tool execution error: {e}")
             state.error = f"Tool agent error: {str(e)}"
-        
+
         return state

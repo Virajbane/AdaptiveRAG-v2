@@ -1,4 +1,7 @@
-{
+{ 
+  "overrides": {
+  "picomatch": "^4.0.4"
+  },
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
