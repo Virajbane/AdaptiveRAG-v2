@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  DOCKER_REGISTRY: ghcr.io/${{ github.actor }}
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -96,6 +96,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Set lowercase image repo
+        id: vars
+        run: echo "repo=$(echo '${{ env.DOCKER_REGISTRY }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -108,8 +111,8 @@ jobs:
           context: ./backend
           push: true
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/rag-backend:${{ env.IMAGE_TAG }}
-            ${{ env.DOCKER_REGISTRY }}/rag-backend:latest
+            ${{ steps.vars.outputs.repo }}/rag-backend:${{ env.IMAGE_TAG }}
+            ${{ steps.vars.outputs.repo }}/rag-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Build & push frontend
@@ -118,8 +121,8 @@ jobs:
           context: ./frontend
           push: true
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/rag-frontend:${{ env.IMAGE_TAG }}
-            ${{ env.DOCKER_REGISTRY }}/rag-frontend:latest
+            ${{ steps.vars.outputs.repo }}/rag-frontend:${{ env.IMAGE_TAG }}
+            ${{ steps.vars.outputs.repo }}/rag-frontend:latest
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.API_URL }}
           cache-from: type=gha
@@ -143,7 +146,7 @@ jobs:
             cd /opt/rag-system
             git pull origin main
             export IMAGE_TAG=${{ env.IMAGE_TAG }}
-            export DOCKER_REGISTRY=${{ env.DOCKER_REGISTRY }}
+            export DOCKER_REGISTRY=$(echo "${{ env.DOCKER_REGISTRY }}" | tr '[:upper:]' '[:lower:]')
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose -f docker-compose.prod.yml pull backend frontend
             docker compose -f docker-compose.prod.yml up -d --no-deps --scale backend=2 backend frontend
