@@ -15,6 +15,17 @@ class level before instantiation:
     - patches keyword_manager (the module-level singleton)
 
 Known gaps documented inline.
+
+Phase 14 note: HybridSearchEngine now reranks its candidate pool with
+the real BGE cross-encoder singleton (app.services.retrieval.reranker.
+bge_reranker) when available, before applying top_k. This is NOT
+patched/mocked in the hybrid_engine fixture below - the real model
+loads and runs during these tests, which means the final result order
+can differ from plain combined_score ordering. Tests that specifically
+verify combined_score-based sorting/combination logic in isolation
+disable the reranker for the duration of that test
+(hybrid_engine.reranker.available = False) so they keep testing what
+they were always meant to test, independent of reranking behavior.
 """
 
 import pytest
@@ -291,6 +302,11 @@ class TestHybridSearchEngine:
     @pytest.mark.asyncio
     async def test_custom_weights_applied(self, hybrid_engine):
         """Non-default weights must flow through to combined_score."""
+        # Single-candidate pool: reranking a pool of size 1 can't reorder
+        # anything, but it CAN overwrite/add a rerank_score - it does not
+        # touch combined_score, which is what this test asserts on, so no
+        # need to disable the reranker here. Documented for clarity since
+        # the test below this one does need to disable it.
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "t", "score": 1.0, "search_type": "vector"},
         ]
@@ -308,6 +324,16 @@ class TestHybridSearchEngine:
 
     @pytest.mark.asyncio
     async def test_results_ordered_by_combined_score_descending(self, hybrid_engine):
+        # This test verifies the combine/dedupe/sort-by-combined_score
+        # pipeline in isolation. Reranking (when the BGE model is
+        # available) intentionally reorders the final result by
+        # rerank_score instead, which is a deliberate behavior change
+        # from Phase 14 - covered by its own dedicated reranker test,
+        # not this one. Disabling it here keeps this test asserting on
+        # what it was always meant to verify: the pre-rerank combined
+        # score ordering produced by _combine_results/_deduplicate/sort.
+        hybrid_engine.reranker.available = False
+
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "low", "score": 0.4, "search_type": "vector"},
             {"doc_id": "doc1", "chunk_index": 1, "text": "high", "score": 0.9, "search_type": "vector"},

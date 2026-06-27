@@ -1,13 +1,19 @@
+import asyncio
 from typing import List
 from app.services.retrieval.vector_search import VectorSearchEngine
 from app.services.retrieval.keyword_search import keyword_manager
+from app.services.retrieval.reranker import bge_reranker
 
 class HybridSearchEngine:
-    """Combine vector and keyword search"""
+    """Combine vector and keyword search, with optional BGE reranking"""
     
     def __init__(self):
         self.vector_engine = VectorSearchEngine()
         self.keyword_engine = keyword_manager
+        # bge_reranker is a module-level singleton (see reranker.py) -
+        # the model is ~500MB and loaded once at import time, not
+        # re-created per HybridSearchEngine instance.
+        self.reranker = bge_reranker
     
     async def search(
         self,
@@ -15,24 +21,32 @@ class HybridSearchEngine:
         user_id: str,
         top_k: int = 5,
         vector_weight: float = 0.6,
-        keyword_weight: float = 0.4
+        keyword_weight: float = 0.4,
+        rerank_pool_size: int = 10
     ) -> List[dict]:
         """
-        Hybrid search combining vector + keyword
+        Hybrid search combining vector + keyword, then reranked.
         
         Args:
             query: Search query
             user_id: User ID
-            top_k: Number of results to return
+            top_k: Number of final results to return
             vector_weight: Weight for vector search (0-1)
             keyword_weight: Weight for keyword search (0-1)
+            rerank_pool_size: How many combined candidates to hand to the
+                reranker before cutting down to top_k. Larger than top_k
+                on purpose - the cheap vector+keyword combined_score is
+                used to narrow the field first, then the more expensive
+                but more accurate cross-encoder reranks within that
+                narrowed pool. If the reranker is unavailable, this has
+                no effect - behavior falls back to the original
+                combined_score-sorted result exactly as before.
         
         Returns:
-            Top-k combined and reranked results
+            Top-k results, reranked by BGE cross-encoder when available
         """
         
         # Run both searches in parallel
-        import asyncio
         vector_results, keyword_results = await asyncio.gather(
             self.vector_engine.search(query, user_id, top_k=10),
             self.keyword_engine.search(user_id, query, top_k=10)
@@ -49,11 +63,35 @@ class HybridSearchEngine:
         # Deduplicate (keep highest score for each chunk)
         deduped = self._deduplicate(combined)
         
-        # Sort by combined score
+        # Sort by combined score (vector + keyword blend) - this is the
+        # cheap first-pass ranking used to select the candidate pool
         deduped.sort(key=lambda x: x['combined_score'], reverse=True)
         
-        # Return top-k
-        return deduped[:top_k]
+        # Narrow to a candidate pool before the expensive rerank step.
+        # If there are fewer candidates than the pool size, this is a
+        # no-op slice.
+        candidate_pool = deduped[:rerank_pool_size]
+        
+        # Rerank the candidate pool. CrossEncoder.predict() is a
+        # blocking, CPU/GPU-bound call (not I/O), so it's run via
+        # run_in_executor to avoid freezing the event loop for every
+        # other concurrent request - same pattern already used for the
+        # blocking Ollama call in services/document/embedder.py.
+        if self.reranker.available and candidate_pool:
+            loop = asyncio.get_event_loop()
+            reranked = await loop.run_in_executor(
+                None,
+                self.reranker.rerank,
+                query,
+                candidate_pool,
+                top_k
+            )
+            return reranked
+        
+        # Reranker unavailable (model failed to load) or empty pool -
+        # fall back to the original combined_score ranking, unchanged
+        # from pre-reranker behavior.
+        return candidate_pool[:top_k]
     
     def _combine_results(
         self,
