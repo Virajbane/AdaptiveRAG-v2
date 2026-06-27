@@ -48,6 +48,7 @@ class AgentOrchestrator:
         # Cache Check
         # -----------------------------
         cached_result = query_cache.get(question, user_id)
+        print(f"[DEBUG] Cache size: {len(query_cache.cache)}, hit: {cached_result is not None}")
 
         if cached_result:
             print("\n[CACHE HIT]")

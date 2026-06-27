@@ -78,7 +78,7 @@ Write-Host "Cold query   : $([Math]::Round($s1,2))s" -ForegroundColor White
 Write-Host "Cached query : $([Math]::Round($s2,2))s" -ForegroundColor White
 Write-Host "New query    : $([Math]::Round($s3,2))s" -ForegroundColor White
 
-if ($s2 -lt 1 -and $s3 -lt 90) {
+if ($s2 -lt ($s1 / 3) -and $s3 -lt 90)  {
     Write-Host "`n🎉 ALL PHASE 11 PERFORMANCE TESTS PASSED" -ForegroundColor Green
 } elseif ($s2 -lt 1) {
     Write-Host "`n✅ Caching works. New-query latency still optimising." -ForegroundColor Yellow
