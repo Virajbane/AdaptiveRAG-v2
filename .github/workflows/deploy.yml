@@ -19,11 +19,11 @@ jobs:
         image: mongo:7.0
         env:
           MONGO_INITDB_ROOT_USERNAME: admin
-          MONGO_INITDB_ROOT_PASSWORD: testpassword
+          MONGO_INITDB_ROOT_PASSWORD: password123
         ports:
           - 27017:27017
         options: >-
-            --health-cmd "mongosh -u admin -p testpassword --authenticationDatabase admin --eval 'db.runCommand(\"ping\").ok' --quiet"
+            --health-cmd "mongosh -u admin -p password123 --authenticationDatabase admin --eval 'db.runCommand(\"ping\").ok' --quiet"
             --health-interval 10s
             --health-timeout 5s
             --health-retries 10
@@ -50,7 +50,7 @@ jobs:
       - name: Run unit tests
         working-directory: backend
         env:
-          MONGODB_URL: mongodb://admin:testpassword@localhost:27017/rag_test?authSource=admin
+          MONGODB_URL: mongodb://admin:password123@localhost:27017/rag_test?authSource=admin
           REDIS_URL: redis://localhost:6379
           QDRANT_URL: http://localhost:6333
           JWT_SECRET_KEY: test-secret-key-for-ci-minimum-32-chars
