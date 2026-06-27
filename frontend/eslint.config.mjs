@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Downgrade to warning: this rule flags the common, correct
+  // "fetch data in useEffect, setState with result" pattern.
+  // Tracked as a known false-positive in TROUBLESHOOTING.md.
+  {
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;

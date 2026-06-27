@@ -11,11 +11,6 @@ export default function MemoryPage() {
   const [error, setError] = useState('');
   const [sessionId, setSessionId] = useState('default_session');
 
-  useEffect(() => {
-    if (token) {
-      loadMemory();
-    }
-  }, [token, sessionId]);
 
   const loadMemory = async () => {
     try {
@@ -45,6 +40,12 @@ export default function MemoryPage() {
       setLoading(false);
     }
   };
+  
+  useEffect(() => {
+    if (token) {
+      loadMemory();
+    }
+  }, [token, sessionId]);
 
   const clearSession = async () => {
     if (!window.confirm('Clear this conversation?')) return;

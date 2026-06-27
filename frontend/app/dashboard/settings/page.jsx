@@ -15,11 +15,6 @@ export default function SettingsPage() {
     maxResults: 5
   });
 
-  useEffect(() => {
-    if (token) {
-      loadUserProfile();
-    }
-  }, [token]);
 
   const loadUserProfile = async () => {
     try {
@@ -47,6 +42,12 @@ export default function SettingsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (token) {
+      loadUserProfile();
+    }
+  }, [token]);
 
   const handleLogout = () => {
     logout();
