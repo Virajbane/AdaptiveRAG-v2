@@ -1,48 +1,45 @@
-# Deployment Guide
+# Deployment Guide - RAG 2.0
 
-## Prerequisites
-- Docker and Docker Compose installed
-- All `.env` files configured
-- MongoDB, Redis, Qdrant, Ollama properly configured
+## Methods
+| Method | Use case |
+|--------|----------|
+| docker-compose.yml | Local dev |
+| docker-compose.prod.yml | Production manual |
+| GitHub Actions | Auto CI/CD on push to main |
 
-## Production Deployment
+## Quick Start (Production)
 
-### 1. Prepare Environment
 ```bash
-cp .env.example .env
-# Edit .env with production values
+cp .env.prod.example .env
+# Fill in all values in .env
+bash scripts/deploy.sh
+bash scripts/health-check.sh
 ```
 
-### 2. Build and Start Services
-```bash
-docker-compose up -d
-```
+## GitHub Actions CI/CD
 
-### 3. Verify Services
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/health/detailed
-curl http://localhost:3000
-```
+Add these secrets in GitHub repo Settings > Secrets > Actions:
+- PROD_HOST  — your server IP
+- PROD_USER  — SSH username
+- PROD_SSH_KEY — private SSH key
+- API_URL    — https://your-domain.com
 
-### 4. Monitor Logs
-```bash
-docker-compose logs -f backend
-docker-compose logs -f frontend
-```
+Pipeline: push to main -> tests -> build images -> deploy -> smoke test
 
-## Security Checklist
-- [ ] All passwords changed from defaults
-- [ ] JWT secret key is strong (32+ chars)
-- [ ] API keys stored in .env (not in code)
-- [ ] SSL/TLS configured (reverse proxy)
-- [ ] Firewall rules configured
-- [ ] Database backups enabled
+## Backups
+```bash
+bash scripts/backup.sh          # manual
+# Cron: 0 2 * * * /path/scripts/backup.sh
+```
+Kept for 7 days, then auto-deleted.
 
 ## Scaling
-- Increase replicas: `docker-compose up -d --scale backend=3`
-- Use load balancer (nginx) in front
-- Cache with CDN for frontend
+```bash
+docker compose -f docker-compose.prod.yml up -d --scale backend=3
+```
 
-## Troubleshooting
-See TROUBLESHOOTING.md for common issues
+## Logs
+```bash
+docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml logs -f frontend
+```
