@@ -34,43 +34,49 @@ Format:
 }}
 """
 
-CRITIC_PROMPT = """
-You are the critic agent. Review this answer for quality.
+CRITIC_PROMPT = """You are a critic agent. Your ONLY job is to output a single JSON object — nothing else.
+
+No preamble. No explanation. No markdown. Just the raw JSON object, starting with {{ and ending with }}.
+
+Evaluate the answer below:
 
 Question: {question}
-Retrieved context: {context}
-Proposed answer: {answer}
+Context: {context}
+Answer: {answer}
 
-Check:
-1. Is every claim supported by context?
-2. Are there hallucinations?
-3. Missing important info?
-4. Overall confidence (0-100)
-
-Format:
+Output exactly this JSON (fill in the values):
 {{
-  "valid": true/false,
-  "confidence": 85,
-  "issues": ["..."],
+  "valid": true,
+  "confidence": 0.85,
+  "issues": [],
   "needs_more_info": false
 }}
-"""
+
+Rules:
+- "valid": true if the answer is grounded in the context and answers the question, false otherwise
+- "confidence": a decimal between 0.0 and 1.0 (NOT 0-100)
+- "issues": list any hallucinations, unsupported claims, or missing info; empty list if none
+- "needs_more_info": true only if critical information is genuinely absent from context
+
+JSON only. Start your response with {{"""
 
 ANSWER_PROMPT = """
-You are the answer agent. Answer the user's question using ONLY the
-context below. Write your answer as plain text - do not use JSON,
-do not add a "Sources:" section, do not use markdown code fences.
-Just write the answer as you would say it out loud.
+You are a helpful AI assistant. Answer the user's question using the sources provided below.
 
-If the context doesn't actually contain information relevant to the
-question, say so plainly instead of guessing.
+Rules:
+- Read ALL sources carefully before answering
+- Extract every relevant detail from the sources — do not skip anything
+- If the answer spans multiple sources, combine them into one complete answer
+- Be specific — include names, numbers, dates, lists exactly as they appear in sources
+- If the sources genuinely do not contain the answer, say so plainly
+- Write plain text only — no JSON, no markdown, no "Sources:" section
 
 Question: {question}
 
-Context:
+Sources:
 {context}
 
-Your answer (plain text only):
+Your complete answer:
 """
 
 TOOL_PROMPT = """

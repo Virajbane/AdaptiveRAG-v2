@@ -4,22 +4,8 @@ from app.agents.prompts import ANSWER_PROMPT
 
 
 class AnswerAgent(BaseAgent):
-    """
-    Answer Agent: Generates final response
-
-    CRITICAL FIXES:
-    1. Sources ONLY from real retrieved_docs (never LLM-invented)
-    2. Confidence calculation fixed
-    3. Plain text output from LLM
-    4. Performance optimization:
-       - Only top 3 docs sent to LLM
-       - Only first 300 chars of each doc
-    """
-
     async def _execute(self, state: AgentState) -> AgentState:
-        """Generate final answer with citations"""
 
-        # No documents found
         if not state.retrieved_docs:
             state.answer = (
                 "I don't have any documents to search. "
@@ -27,19 +13,14 @@ class AnswerAgent(BaseAgent):
             )
             state.sources = []
             state.confidence_final = state.confidence * 0.3
-
             print("[ANSWER] No documents - returning explicit message")
             return state
 
-        # --------------------------------------------------
-        # PERFORMANCE OPTIMIZATION
-        # Use only Top-3 retrieved documents
-        # Truncate each to 300 characters
-        # --------------------------------------------------
-        top_docs = state.retrieved_docs[:3]
+        # Use top 6 docs, full text — no truncation
+        top_docs = state.retrieved_docs[:6]
 
-        context = "\n".join([
-            f"[{i}] {doc['text'][:300]}..."
+        context = "\n\n".join([
+            f"[Source {i}]\n{doc['text']}"
             for i, doc in enumerate(top_docs, 1)
         ])
 
@@ -51,31 +32,49 @@ class AnswerAgent(BaseAgent):
                 context=context
             )
 
-            # Generate answer
             response = await self.call_llm(prompt)
             state.answer = response.strip()
 
-            # Sources from REAL retrieved docs
+            # NOTE: sources built from top_docs (the docs actually sent to
+            # the LLM), not all retrieved_docs - previously these could
+            # diverge if Retriever's top_k ever changed independently of
+            # AnswerAgent's top-6 slice.
             state.sources = [
                 {
                     "doc_id": doc["doc_id"],
                     "chunk_index": doc["chunk_index"],
                     "text": doc["text"][:200],
-                    "score": doc["combined_score"],
+                    "score": doc.get("rerank_score", doc.get("combined_score", 0.0)),
                 }
-                for doc in state.retrieved_docs
+                for doc in top_docs
             ]
 
-            # Confidence calculation
-            avg_doc_score = (
-                sum(doc["combined_score"] for doc in state.retrieved_docs)
-                / len(state.retrieved_docs)
-            )
+            # Confidence fix: combined_score is the RRF fusion score, which
+            # is rank-based and deliberately tiny/tightly-clustered
+            # (RRF_K=60 means scores live in roughly the 0.01-0.05 range
+            # no matter how good or bad retrieval actually is). Averaging
+            # that directly into a 0-1 confidence score mathematically
+            # guarantees confidence_final lands near ~0.42-0.45 for EVERY
+            # query regardless of answer quality - which is exactly the
+            # symptom observed (confidence stuck at 0.44-0.47 across
+            # multiple different, correct answers).
+            #
+            # rerank_score (the BGE cross-encoder score) carries real
+            # signal about retrieval relevance and should be used instead.
+            # Falls back to combined_score only if reranking didn't run.
+            scored_docs = [
+                doc.get("rerank_score", doc.get("combined_score", 0.0))
+                for doc in state.retrieved_docs
+            ]
+            avg_doc_score = sum(scored_docs) / len(scored_docs) if scored_docs else 0.0
+
+            # rerank_score from a cross-encoder isn't naturally bounded to
+            # [0, 1] - clamp defensively so confidence_final stays sane
+            # even if the model's raw score is outside that range.
+            avg_doc_score = max(0.0, min(avg_doc_score, 1.0))
 
             state.confidence_final = min(
-                state.confidence * 0.5 +
-                avg_doc_score * 0.5,
-                1.0
+                state.confidence * 0.5 + avg_doc_score * 0.5, 1.0
             )
 
             print(f"[ANSWER] Generated response with {len(state.sources)} sources")

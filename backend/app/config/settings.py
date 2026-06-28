@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # ==================== LLM ====================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"
+    OLLAMA_FAST_MODEL: str = "qwen2.5:0.5b"   
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # ==================== API KEYS ====================

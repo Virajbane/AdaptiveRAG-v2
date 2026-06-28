@@ -8,17 +8,21 @@ class PDFParser:
     
     @staticmethod
     def parse(file_path: str) -> str:
-        """Extract text from PDF"""
-        text = ""
-        try:
-            doc = fitz.open(file_path)
-            for page_num, page in enumerate(doc):
-                text += f"\n--- Page {page_num + 1} ---\n"
-                text += page.get_text()
-            doc.close()
-            return text
-        except Exception as e:
-            raise ValueError(f"Error parsing PDF: {str(e)}")
+            text = ""
+            try:
+                doc = fitz.open(file_path)
+                for page in doc:
+                    page_text = page.get_text()
+                    if page_text.strip():
+                        text += page_text + "\n"
+                doc.close()
+                # DEBUG - remove after testing
+                print(f"[PARSER DEBUG] Total chars: {len(text)}")
+                print(f"[PARSER DEBUG] Newline count: {text.count(chr(10))}")
+                print(f"[PARSER DEBUG] First 300 chars: {repr(text[:300])}")
+                return text
+            except Exception as e:
+                raise ValueError(f"Error parsing PDF: {str(e)}")
         
 
 

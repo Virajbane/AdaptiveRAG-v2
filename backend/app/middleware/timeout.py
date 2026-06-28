@@ -7,8 +7,8 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
     """Add request timeouts to prevent hanging"""
     
     TIMEOUT_CONFIG = {
-        "/api/v1/agents/chat": 120,        # 2 minutes max
-        "/api/v1/documents/upload": 300,   # 5 minutes max
+        "/api/v1/agents/chat": 900,        # 15 minutes max
+        "/api/v1/documents/upload": 600,   # 10 minutes max
         "/api/v1/auth/login": 30,          # 30 seconds max
         "/api/v1/auth/register": 30,       # 30 seconds max
     }

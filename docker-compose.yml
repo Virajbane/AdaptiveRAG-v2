@@ -27,7 +27,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: rag-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server 
     ports:
       - "6379:6379"
     volumes:
