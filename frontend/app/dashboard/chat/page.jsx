@@ -6,12 +6,21 @@ import { useAuth } from '@/app/context/AuthContext';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const CHAT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — matches Ollama on CPU
 
+// NOTE: Your backend's /api/v1/agents/chat is currently stateless — one
+// message in, one answer out, nothing saved server-side. There is no
+// session concept yet, so this page is a single ongoing conversation
+// (cleared on refresh) rather than a multi-conversation history rail.
+// If/when session persistence is added on the backend, the history rail
+// can come back — this was deliberately simplified for now.
+
 export default function ChatPage() {
   const { token } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [sourcesOpen, setSourcesOpen] = useState(true);
+
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
   const timerRef = useRef(null);
@@ -24,13 +33,10 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  // Show elapsed time while waiting so user knows it's working
   useEffect(() => {
     if (loading) {
       setElapsedSeconds(0);
-      timerRef.current = setInterval(() => {
-        setElapsedSeconds((s) => s + 1);
-      }, 1000);
+      timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     } else {
       clearInterval(timerRef.current);
       setElapsedSeconds(0);
@@ -48,30 +54,31 @@ export default function ChatPage() {
     setInput('');
     setLoading(true);
 
-    // Create abort controller for this request
     abortControllerRef.current = new AbortController();
-    const timeoutId = setTimeout(() => {
-      abortControllerRef.current?.abort();
-    }, CHAT_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => abortControllerRef.current?.abort(), CHAT_TIMEOUT_MS);
 
     try {
+      // Matches your real backend's ChatRequest shape exactly:
+      // { message: str, top_k: int = 5 } — see app/api/v1/endpoints/agents.py
       const response = await fetch(`${API_URL}/api/v1/agents/chat`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: currentInput }),
+        body: JSON.stringify({ message: currentInput, top_k: 5 }),
         signal: abortControllerRef.current.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`${response.status}: ${errText}`);
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.detail || `Request failed (${response.status})`);
       }
 
+      // Matches your real ChatResponse shape:
+      // { answer, sources: list[dict], confidence, search_time_ms }
       const data = await response.json();
 
       setMessages((prev) => [
@@ -80,6 +87,8 @@ export default function ChatPage() {
           role: 'assistant',
           content: data.answer,
           confidence: data.confidence,
+          sources: data.sources || [],
+          searchTimeMs: data.search_time_ms,
         },
       ]);
     } catch (error) {
@@ -87,19 +96,10 @@ export default function ChatPage() {
       if (error.name === 'AbortError') {
         setMessages((prev) => [
           ...prev,
-          {
-            role: 'assistant',
-            content: 'Request timed out after 15 minutes. Ollama is still processing — try a shorter question or wait.',
-          },
+          { role: 'assistant', content: 'Request timed out after 15 minutes. Try a shorter question or wait.' },
         ]);
       } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: `Error: ${error.message}`,
-          },
-        ]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${error.message}` }]);
       }
     } finally {
       setLoading(false);
@@ -111,79 +111,191 @@ export default function ChatPage() {
     setLoading(false);
   };
 
+  const clearChat = () => {
+    if (messages.length === 0) return;
+    if (!window.confirm('Clear this conversation? This cannot be undone since nothing is saved.')) return;
+    setMessages([]);
+  };
+
+  const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant');
+  const currentSources = lastAssistantMessage?.sources || [];
+
   return (
-    <div className="max-w-4xl mx-auto h-screen flex flex-col p-6">
-      <div className="mb-4">
-        <h1 className="text-3xl font-bold">Chat with RAG</h1>
-        <p className="text-gray-600">Ask questions about your documents</p>
-      </div>
-
-      <div className="flex-1 overflow-y-auto border border-gray-300 rounded-lg p-4 mb-4 bg-gray-50">
-        {messages.length === 0 && (
-          <div className="text-center text-gray-400 mt-8">
-            <p>No messages yet. Ask something about your documents!</p>
+    <div className="flex h-[calc(100vh-57px)]">
+      {/* ---------- Conversation ---------- */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 lg:px-8">
+          <div>
+            <h1 className="text-[15px] font-medium text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+              Chat
+            </h1>
+            <p className="text-[12px]" style={{ color: '#71717A' }}>
+              Ask questions about your documents
+            </p>
           </div>
-        )}
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-300 text-gray-900'
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
-              {msg.confidence !== undefined && (
-                <p className="text-xs mt-1 opacity-70">
-                  Confidence: {(msg.confidence * 100).toFixed(0)}%
-                </p>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex justify-start mb-4 items-center gap-3">
-            <div className="bg-gray-300 text-gray-900 px-4 py-2 rounded-lg flex items-center gap-2">
-              <span className="animate-pulse">●</span>
-              <span className="animate-pulse delay-100">●</span>
-              <span className="animate-pulse delay-200">●</span>
-              <span className="text-sm text-gray-600 ml-2">
-                Thinking... {elapsedSeconds}s
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleCancel}
-              className="text-sm text-red-500 hover:text-red-700 underline"
+              onClick={clearChat}
+              className="rounded-[8px] border border-white/10 px-3 py-1.5 text-[12px] text-[#A1A1AA] transition-colors hover:bg-white/5 hover:text-white"
             >
-              Cancel
+              Clear chat
+            </button>
+            <button
+              onClick={() => setSourcesOpen((v) => !v)}
+              className="rounded-[8px] border border-white/10 p-2 text-[#A1A1AA] transition-colors hover:text-white xl:hidden"
+              aria-label="Toggle sources"
+            >
+              <SourcesIcon />
             </button>
           </div>
-        )}
-        <div ref={messagesEndRef} />
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8">
+          {messages.length === 0 && (
+            <div className="mt-12 text-center" style={{ color: '#71717A' }}>
+              <p className="text-[15px]">Ask something about your documents.</p>
+            </div>
+          )}
+          <div className="mx-auto max-w-2xl">
+            {messages.map((msg, idx) => (
+              <div key={idx} className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-md rounded-[11px] px-4 py-2 ${
+                    msg.role === 'user' ? 'text-[#022C22]' : 'border border-white/10 bg-white/6 text-[#F4F4F5]'
+                  }`}
+                  style={msg.role === 'user' ? { background: '#34D399' } : undefined}
+                >
+                  <p className="whitespace-pre-wrap text-[14px]">{msg.content}</p>
+                  {msg.confidence !== undefined && (
+                    <p className="mt-1 text-[11px] opacity-70" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                      Confidence: {(msg.confidence * 100).toFixed(0)}%
+                      {msg.searchTimeMs !== undefined && ` • ${msg.searchTimeMs.toFixed(0)}ms`}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex items-center gap-2 rounded-[11px] border border-white/10 bg-white/6 px-4 py-2 text-[#F4F4F5]">
+                  <span className="animate-pulse" style={{ color: '#34D399' }}>●</span>
+                  <span className="animate-pulse delay-100" style={{ color: '#34D399' }}>●</span>
+                  <span className="animate-pulse delay-200" style={{ color: '#34D399' }}>●</span>
+                  <span className="ml-2 text-[13px]" style={{ color: '#A1A1AA' }}>
+                    Thinking… {elapsedSeconds}s
+                  </span>
+                </div>
+                <button onClick={handleCancel} className="text-[13px] underline hover:text-white" style={{ color: '#F87171' }}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <form onSubmit={handleSendMessage} className="border-t border-white/10 p-4">
+          <div className="mx-auto flex max-w-2xl gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask me anything about your documents…"
+              disabled={loading}
+              className="flex-1 rounded-[11px] border border-white/10 bg-[#0F0F11]/60 px-4 py-2.5 text-[14px] text-white placeholder-[#52525B] outline-none transition-all duration-200 focus:border-[#34D399] focus:shadow-[0_0_0_3px_rgba(52,211,153,0.15)]"
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="rounded-[11px] px-6 py-2.5 text-[14px] font-medium text-[#022C22] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(52,211,153,0.35)] disabled:translate-y-0 disabled:opacity-50 disabled:hover:shadow-none"
+              style={{ background: '#34D399' }}
+            >
+              {loading ? `${elapsedSeconds}s…` : 'Send'}
+            </button>
+          </div>
+        </form>
       </div>
 
-      <form onSubmit={handleSendMessage} className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask me anything about your documents..."
-          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          disabled={loading}
-        />
+      {/* ---------- Sources panel ---------- */}
+      <aside
+        className={`hidden shrink-0 flex-col border-l border-white/10 bg-[#18181B]/20 backdrop-blur-xl xl:flex ${
+          sourcesOpen ? 'w-72' : 'w-0 overflow-hidden border-l-0'
+        } transition-all duration-200`}
+      >
+        <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <h3
+            className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+            style={{ fontFamily: 'JetBrains Mono, monospace', color: '#71717A' }}
+          >
+            Sources
+          </h3>
+          <button onClick={() => setSourcesOpen(false)} className="text-[#71717A] hover:text-white" aria-label="Collapse sources">
+            <CollapseIcon />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {currentSources.length === 0 ? (
+            <p className="text-[13px]" style={{ color: '#71717A' }}>
+              {lastAssistantMessage
+                ? 'No sources were cited for this answer.'
+                : 'Sources used to answer your question will appear here.'}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {currentSources.map((src, idx) => (
+                <div key={idx} className="rounded-[11px] border border-white/10 bg-white/4 p-3">
+                  <p className="truncate text-[13px] font-medium text-white">
+                    {src.filename || src.doc_id || src.source || `Source ${idx + 1}`}
+                  </p>
+                  {(src.page !== undefined || src.score !== undefined || src.relevance_score !== undefined) && (
+                    <p className="mt-0.5 text-[12px]" style={{ color: '#71717A' }}>
+                      {src.page !== undefined ? `Page ${src.page} • ` : ''}
+                      {(src.score ?? src.relevance_score) !== undefined
+                        ? `${Math.round((src.score ?? src.relevance_score) * 100)}% match`
+                        : ''}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {!sourcesOpen && (
         <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => setSourcesOpen(true)}
+          className="hidden w-8 shrink-0 items-center justify-center border-l border-white/10 bg-[#18181B]/20 text-[#71717A] backdrop-blur-xl hover:text-white xl:flex"
+          aria-label="Expand sources"
         >
-          {loading ? `${elapsedSeconds}s...` : 'Send'}
+          <ExpandIcon />
         </button>
-      </form>
+      )}
     </div>
+  );
+}
+
+/* --- icons --- */
+function SourcesIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CollapseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function ExpandIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

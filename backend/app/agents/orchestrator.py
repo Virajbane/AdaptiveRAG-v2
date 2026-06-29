@@ -50,10 +50,11 @@ class AgentOrchestrator:
             user_id=user_id
         )
 
-        final_state: AgentState = await self.graph.ainvoke(initial_state)
+        raw = await self.graph.ainvoke(initial_state)
+        final_state = AgentState(**raw) if isinstance(raw, dict) else raw
 
         if final_state.error:
-            return self._error_response(final_state)
+                    return self._error_response(final_state)
 
         # -----------------------------
         # Save Conversation Memory

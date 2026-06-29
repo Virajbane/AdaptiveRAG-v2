@@ -1,30 +1,24 @@
-// frontend/app/dashboard/documents/page.jsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 import { FileUpload } from '@/components/document/FileUpload';
 
-// No "interface Document {...}" needed in plain JS -
-// we just trust the shape of the data that comes back from the API.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function DocumentsPage() {
-  const { token } = useAuth(); // JWT token, needed for every authenticated request
+  const { token } = useAuth();
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
 
-  const [documents, setDocuments] = useState([]); // list of documents from the backend
-  const [loading, setLoading] = useState(true);   // true while we're fetching
-  const [error, setError] = useState('');          // error message, if any
-
-  // Fetches the user's documents from the backend.
-  // We also pass this function to <FileUpload> so it can re-run
-  // automatically right after a successful upload.
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/documents', {
+      const response = await fetch(`${API_URL}/api/v1/documents`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!response.ok) throw new Error('Failed to fetch documents');
       const data = await response.json();
       setDocuments(data.documents || []);
@@ -35,60 +29,113 @@ export default function DocumentsPage() {
     }
   };
 
-  // Run fetchDocuments once when the page loads, and again
-  // any time the token changes (e.g. after login)
   useEffect(() => {
     fetchDocuments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  return (
-    <div className="max-w-6xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">My Documents</h1>
+  const handleDelete = async (docId) => {
+    if (!window.confirm('Delete this document? This cannot be undone.')) return;
+    setDeletingId(docId);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/documents/${docId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to delete document');
+      setDocuments((prev) => prev.filter((d) => d._id !== docId));
+    } catch (err) {
+      console.error('Error deleting document:', err);
+      setError('Failed to delete document');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
-      {/* Upload Section */}
-      <div className="mb-12">
-        <h2 className="text-xl font-semibold mb-4">Upload New Document</h2>
+  const statusColor = (status) => {
+    if (status === 'processed') return '#34D399';
+    if (status === 'processing') return '#60A5FA';
+    return '#F87171';
+  };
+
+  return (
+    <div className="mx-auto max-w-5xl p-6 lg:p-8">
+      <div className="mb-8">
+        <h1
+          className="text-2xl font-medium tracking-tight text-white"
+          style={{ fontFamily: 'Inter, sans-serif' }}
+        >
+          Documents
+        </h1>
+        <p className="mt-1 text-[14px]" style={{ color: '#A1A1AA' }}>
+          Upload PDFs for your assistant to search and cite.
+        </p>
+      </div>
+
+      {/* Upload */}
+      <div className="mb-10 rounded-[11px] border border-white/10 bg-white/4 p-6 backdrop-blur-xl">
+        <h2
+          className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em]"
+          style={{ fontFamily: 'JetBrains Mono, monospace', color: '#71717A' }}
+        >
+          Upload new document
+        </h2>
         <FileUpload onUploadSuccess={fetchDocuments} />
       </div>
 
-      {/* Documents List */}
+      {/* Documents list */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Your Documents</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2
+            className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+            style={{ fontFamily: 'JetBrains Mono, monospace', color: '#71717A' }}
+          >
+            Your documents
+          </h2>
+          {!loading && documents.length > 0 && (
+            <span className="text-[13px]" style={{ color: '#71717A' }}>
+              {documents.length} {documents.length === 1 ? 'document' : 'documents'}
+            </span>
+          )}
+        </div>
 
         {loading ? (
-          <p className="text-gray-500">Loading documents...</p>
+          <p className="text-[14px]" style={{ color: '#A1A1AA' }}>Loading documents…</p>
         ) : error ? (
-          <p className="text-red-600">{error}</p>
+          <p className="text-[14px]" style={{ color: '#FCA5A5' }}>{error}</p>
         ) : documents.length === 0 ? (
-          <p className="text-gray-500">No documents uploaded yet</p>
+          <div className="rounded-[11px] border border-white/10 bg-white/4 py-12 text-center backdrop-blur-xl">
+            <p className="text-[14px]" style={{ color: '#A1A1AA' }}>No documents uploaded yet</p>
+          </div>
         ) : (
-          <div className="grid gap-4">
+          <div className="grid gap-3">
             {documents.map((doc) => (
               <div
                 key={doc._id}
-                className="border rounded-lg p-4 flex justify-between items-center"
+                className="flex items-center justify-between rounded-[11px] border border-white/10 bg-white/4 p-4 backdrop-blur-xl transition-colors hover:bg-white/6"
               >
-                <div>
-                  <p className="font-semibold">{doc.filename}</p>
-                  <p className="text-sm text-gray-500">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-white">{doc.filename}</p>
+                  <p className="text-[13px]" style={{ color: '#A1A1AA' }}>
                     {(doc.file_size_bytes / 1024 / 1024).toFixed(2)} MB •{' '}
-                    {doc.chunks.count} chunks •{' '}
-                    <span
-                      className={`${
-                        doc.status === 'processed'
-                          ? 'text-green-600'
-                          : doc.status === 'processing'
-                          ? 'text-blue-600'
-                          : 'text-red-600'
-                      }`}
-                    >
-                      {doc.status}
-                    </span>
+                    {doc.chunks?.count ?? 0} chunks •{' '}
+                    <span style={{ color: statusColor(doc.status) }}>{doc.status}</span>
                   </p>
                 </div>
-                <p className="text-sm text-gray-400">
-                  {new Date(doc.created_at).toLocaleDateString()}
-                </p>
+                <div className="ml-4 flex shrink-0 items-center gap-3">
+                  <p className="text-[13px]" style={{ color: '#71717A' }}>
+                    {new Date(doc.created_at).toLocaleDateString()}
+                  </p>
+                  <button
+                    onClick={() => handleDelete(doc._id)}
+                    disabled={deletingId === doc._id}
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[12px] font-medium transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                    style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#FCA5A5' }}
+                    aria-label={`Delete ${doc.filename}`}
+                  >
+                    {deletingId === doc._id ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -1,5 +1,3 @@
-// app/context/AuthContext.jsx
-
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
@@ -8,51 +6,39 @@ const AuthContext = createContext(undefined);
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [userName, setUserName] = useState(null);
+  const [user, setUser] = useState(null); // { id, name, email }
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load from localStorage on mount
   useEffect(() => {
     const savedToken = localStorage.getItem('access_token');
-    const savedUserId = localStorage.getItem('user_id');
-    const savedUserName = localStorage.getItem('user_name');
-
-    if (savedToken && savedUserId) {
+    const savedUser = localStorage.getItem('user');
+    if (savedToken && savedUser) {
       setToken(savedToken);
-      setUserId(savedUserId);
-      setUserName(savedUserName || '');
+      setUser(JSON.parse(savedUser));
     }
-
     setIsLoading(false);
   }, []);
 
-  const login = (newToken, newUserId, newUserName) => {
+  const login = (newToken, newUser) => {
     localStorage.setItem('access_token', newToken);
-    localStorage.setItem('user_id', newUserId);
-    localStorage.setItem('user_name', newUserName);
-
+    localStorage.setItem('user', JSON.stringify(newUser));
     setToken(newToken);
-    setUserId(newUserId);
-    setUserName(newUserName);
+    setUser(newUser);
   };
 
   const logout = () => {
     localStorage.removeItem('access_token');
-    localStorage.removeItem('user_id');
-    localStorage.removeItem('user_name');
-
+    localStorage.removeItem('user');
+    localStorage.removeItem('chat_messages');
     setToken(null);
-    setUserId(null);
-    setUserName(null);
+    setUser(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
         token,
-        userId,
-        userName,
+        user,
         login,
         logout,
         isAuthenticated: !!token,
@@ -65,10 +51,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 }

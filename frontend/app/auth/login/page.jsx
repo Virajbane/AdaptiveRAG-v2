@@ -6,10 +6,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { validateEmail } from '@/config/security';
 import KineticNetwork from '@/components/KineticNetwork';
+import { useAuth } from '@/app/context/AuthContext';
 
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -56,9 +58,11 @@ export default function LoginPage() {
 
       const data = await response.json();
 
-      localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('user_id', data.user_id);
-      localStorage.setItem('user_name', data.name);
+      login(data.access_token, {
+        id: data.user_id,
+        name: data.name,
+        
+      });
 
       const redirect = searchParams.get('redirect') || '/dashboard/chat';
       router.push(redirect);

@@ -1,20 +1,22 @@
-PLANNER_PROMPT = """
-You are the planning agent. Analyze the user's question and decide:
-1. What is the user asking for?
-2. Where should we search? (documents, web, database, memory, general knowledge)
-3. What's the confidence level (0-1)?
-4. What's the fallback if first attempt fails?
+PLANNER_PROMPT = """You are a planning agent. Output only a JSON object — no preamble, no explanation.
 
-User question: {question}
+Question: {question}
 
-Respond in JSON format:
+Rules for "sources":
+- Use ["documents"] if the question can be answered from uploaded documents
+- Use ["web"] if the question needs current external facts (news, prices, live data)
+- Use ["documents", "web"] if it genuinely needs both
+- Default to ["documents"] when in doubt
+
+Output exactly this JSON:
 {{
   "intent": "...",
-  "sources": ["documents", "web"],
+  "sources": ["documents"],
   "confidence": 0.85,
-  "strategy": "Search documents first, then web if no good matches"
+  "strategy": "..."
 }}
-"""
+
+JSON only. Start with {{"""
 
 RETRIEVER_PROMPT = """
 You are the retriever agent. You have retrieved {doc_count} relevant documents.
@@ -34,17 +36,15 @@ Format:
 }}
 """
 
-CRITIC_PROMPT = """You are a critic agent. Your ONLY job is to output a single JSON object — nothing else.
-
-No preamble. No explanation. No markdown. Just the raw JSON object, starting with {{ and ending with }}.
-
-Evaluate the answer below:
+CRITIC_PROMPT = """You are a critic agent. Output only a JSON object — no preamble, no explanation.
 
 Question: {question}
 Context: {context}
 Answer: {answer}
 
-Output exactly this JSON (fill in the values):
+Is the answer supported by the context and does it answer the question?
+
+Output exactly this JSON:
 {{
   "valid": true,
   "confidence": 0.85,
@@ -53,12 +53,12 @@ Output exactly this JSON (fill in the values):
 }}
 
 Rules:
-- "valid": true if the answer is grounded in the context and answers the question, false otherwise
-- "confidence": a decimal between 0.0 and 1.0 (NOT 0-100)
-- "issues": list any hallucinations, unsupported claims, or missing info; empty list if none
-- "needs_more_info": true only if critical information is genuinely absent from context
+- "valid": true if the answer uses information from context to answer the question
+- "confidence": decimal 0.0 to 1.0 (examples: 0.9, 0.75, 0.5) — NEVER write 0 unless answer is completely fabricated
+- "issues": empty list [] if answer is acceptable
+- Be lenient — if the answer is mostly correct, mark valid true
 
-JSON only. Start your response with {{"""
+JSON only. Start with {{"""
 
 ANSWER_PROMPT = """
 You are a helpful AI assistant. Answer the user's question using the sources provided below.
