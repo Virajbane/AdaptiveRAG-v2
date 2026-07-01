@@ -79,6 +79,15 @@ class DocumentQueries:
             "storage_path": storage_path,
             "status": "processing",
             "processing_error": None,
+            # started_at is set separately by mark_processing_started(),
+            # right when the background task actually begins work — not
+            # here at record-creation time. If there's ever a queueing
+            # delay between "record created" and "task actually started"
+            # (e.g. under load, or with a real queue in future), this
+            # keeps started_at meaning what it says: when work began, not
+            # when the record was inserted. created_at already covers
+            # "when was this uploaded."
+            "started_at": None,
             "chunks": {
                 "count": 0,
                 "average_tokens": 0,
@@ -116,6 +125,23 @@ class DocumentQueries:
         ).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
         return docs
     
+    async def mark_processing_started(self, doc_id: str) -> bool:
+        """
+        Stamp started_at the moment background processing actually begins
+        (called at the top of process_document(), before the real work).
+
+        This is the field stale-job detection keys off of — a document
+        sitting at status="processing" with a started_at from 20 minutes
+        ago, when processing normally takes seconds, is almost certainly
+        a job whose background task died (process crash/restart) rather
+        than one that's just slow.
+        """
+        result = await self.collection.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": {"started_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+
     async def update_document_status(
         self,
         doc_id: str,
@@ -145,7 +171,27 @@ class DocumentQueries:
             {"$set": update_data}
         )
         return result.modified_count > 0
-    
+
+    async def get_stale_processing_documents(self, user_id: str, timeout_minutes: int = 10) -> list:
+        """
+        Find documents stuck at status="processing" whose started_at is
+        older than `timeout_minutes`. These are almost certainly jobs
+        whose background task died mid-flight (process restart/crash) —
+        a real in-progress job on this codebase should finish well within
+        a few minutes based on observed per-node timings.
+
+        Used by the /documents/{doc_id}/retry endpoint and can also back
+        a "stuck uploads" indicator in the frontend.
+        """
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        docs = await self.collection.find({
+            "user_id": user_id,
+            "status": "processing",
+            "started_at": {"$ne": None, "$lt": cutoff},
+        }).to_list(length=100)
+        return docs
+
     async def delete_document(self, doc_id: str, user_id: str) -> bool:
         """Delete document"""
         result = await self.collection.delete_one({

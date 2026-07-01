@@ -30,8 +30,9 @@ Most RAG demos are a single retrieval step bolted onto an LLM call. This project
               ┌─────────────────────────────────────────┐
               │            Agent Orchestrator             │
               │                                            │
-              │   Planner ──▶ Retriever (parallel) ──▶    │
-              │       Tool Agent (web/calc) ──▶ Answer     │
+              │  Rewriter ──▶ Planner + Retriever (∥) ──▶ │
+              │  Grader ──▶ Tool Agent (web/calc) ──▶      │
+              │  Answer ──▶ Critic (retry loop)            │
               │                                            │
               └──────┬───────────────┬──────────────┬──────┘
                      ▼               ▼              ▼
@@ -50,7 +51,7 @@ Most RAG demos are a single retrieval step bolted onto an LLM call. This project
               └─────────────┘
 ```
 
-**Request flow:** A user message hits the FastAPI `/agents/chat` endpoint → the **Planner Agent** decides which sources are needed (documents? web? both?) → the **Retriever Agent** runs hybrid search (BM25 keyword + Qdrant vector search, merged and weighted) in parallel with planning → the **Tool Agent** calls external tools (web search via Tavily, a sandboxed calculator) if the plan calls for it → the **Answer Agent** generates a final response using only the top retrieved chunks, with sources traced back to real retrieved documents (never invented by the LLM) → the result is cached in-memory for repeat queries.
+**Request flow:** A user message hits the FastAPI `/agents/chat` endpoint → the **Rewriter Agent** resolves conversational context and fixes typos → the **Planner Agent** decides which sources are needed (documents? web? both?) in parallel with the **Retriever Agent** running hybrid search (BM25 keyword + Qdrant vector search, fused via Reciprocal Rank Fusion and reranked with a BGE cross-encoder) → the **Grader Agent** drops near-irrelevant chunks before they reach the answer step → the **Tool Agent** calls external tools (web search via Tavily, a sandboxed calculator) if the plan calls for it → the **Answer Agent** generates a final response using only the top retrieved chunks, with sources traced back to real retrieved documents (never invented by the LLM) → the **Critic Agent** validates groundedness and triggers a surgical retry (answer-only) if the response fails the check → the result is cached in Redis for repeat queries.
 
 ---
 
@@ -64,7 +65,7 @@ Most RAG demos are a single retrieval step bolted onto an LLM call. This project
 | Embeddings | Ollama — `nomic-embed-text` | 768-dim vectors |
 | Vector DB | Qdrant | Per-user namespace isolation |
 | Document/chat store | MongoDB | Users, documents, chat sessions, long-term memory |
-| Cache / short-term memory | Redis | Session history, in-memory query cache (Redis migration planned, see Roadmap) |
+| Cache / short-term memory | Redis | Session history, Redis-backed query cache (shared across replicas) |
 | Keyword search | BM25 (`rank_bm25`, BM25Plus variant) | Combined with vector scores in hybrid search |
 | Auth | JWT (PyJWT) + bcrypt | Rate-limited, validated, audit-logged |
 | Testing | pytest + pytest-asyncio | 131 backend unit tests |
@@ -81,7 +82,7 @@ Most RAG demos are a single retrieval step bolted onto an LLM call. This project
 | **Planner** | Reads the question, decides which sources are needed (`documents`, `web`, `tools`), sets a confidence level |
 | **Retriever** | Runs hybrid search (vector + BM25 keyword) against the user's own document index, in parallel with the Planner |
 | **Tool Agent** | Calls web search or the calculator tool when the plan requires it |
-| **Critic** | Validates groundedness and flags hallucination risk *(built, not yet wired into the live orchestration path — see Known Gaps)* |
+| **Critic** | Validates groundedness and flags hallucination risk; wired into the live orchestration graph, driving a surgical answer-only retry loop on failed checks |
 | **Answer** | Generates the final response strictly from the top retrieved chunks, with citations traced to real source documents |
 
 All agents share a single `AgentState` object, run through a `BaseAgent.run()` wrapper that catches and records errors per-agent without crashing the whole pipeline.
@@ -157,14 +158,12 @@ This project was built in 12 sequential phases, each with its own deliverables a
 | 11 | Performance (parallel agent execution, query cache, profiler) | ✅ Complete |
 | 12 | CI/CD pipeline (GitHub Actions, GHCR, automated deploy) | ✅ Complete |
 | 13 | Documentation | 🚧 In progress |
-| 14 | Further optimization (Redis-backed cache, reranker wiring, DB indexes) | ⏳ Planned |
+| 14 | Hybrid search upgrade (RRF fusion, BGE reranker wiring, Redis-backed cache) | ✅ Complete |
 
 ### Known gaps
 
-- **Query cache is in-memory only** — lost on server restart; planned migration to Redis-backed cache (Phase 14)
-- **BGE reranker** (`backend/app/services/retrieval/reranker.py`) is implemented but not yet wired into `hybrid_search.py`
-- **CriticAgent** is implemented and unit-tested in isolation, but not yet called inside the live orchestrator flow
 - **Production deploy target** — the `deploy` CI job is fully written but requires a provisioned server and GitHub Secrets (`PROD_HOST`, `PROD_USER`, `PROD_SSH_KEY`, `API_URL`) to actually run
+- **Query cache key uses raw query text**, not the rewritten query from RewriterAgent — semantically identical questions phrased differently miss the cache
 
 These are tracked deliberately, not hidden — see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) and the test suite's own documented "known gap" tests for specifics.
 

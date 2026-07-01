@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     REDIS_URL: str = "redis://localhost:6379/0"
 
+
+    # ==================== LANGSMITH ====================
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_PROJECT: str = "rag-2.0-system"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
+
     # ==================== LLM ====================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"

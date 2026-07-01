@@ -26,8 +26,10 @@ class CriticAgent(BaseAgent):
 
         Strategy:
         1. Try direct parse (model was well-behaved).
-        2. Find the first '{' and last '}' and parse the substring
-           (handles preamble like "The answer looks correct... { ... }").
+        2. Balanced-brace scan for the first complete {...} object
+           (handles preamble like "The answer looks correct... { ... }",
+           and correctly stops at the end of the FIRST object instead
+           of spanning to the last '}' in the text).
         3. Try to extract from a markdown code block.
         4. Give up and return a safe default.
         """
@@ -39,12 +41,17 @@ class CriticAgent(BaseAgent):
         except json.JSONDecodeError:
             pass
 
-        # 2. Extract outermost { ... }
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
+        # 2. Balanced-brace scan for the first complete {...} object.
+        #    Replaces the old `text[start:rfind('}')]` approach, which
+        #    used the LAST '}' in the string. That broke when qwen2.5
+        #    emitted two JSON blocks back to back (e.g. one example
+        #    block + one real answer) — the old slice spanned across
+        #    both blocks and produced invalid JSON. See
+        #    BaseAgent._extract_balanced_json for the implementation.
+        candidate = self._extract_balanced_json(text)
+        if candidate:
             try:
-                return json.loads(text[start:end + 1])
+                return json.loads(candidate)
             except json.JSONDecodeError:
                 pass
 
@@ -97,7 +104,15 @@ class CriticAgent(BaseAgent):
 
         # Normalise confidence to 0-1 regardless of whether the model
         # returned 0-1 or 0-100 (qwen2.5 does both unpredictably).
-        raw_conf = float(criticism.get("confidence", 0))
+        #
+        # NOTE: dict.get(key, default) only falls back to `default` when
+        # the key is MISSING. If the model emits `"confidence": null`
+        # literally, the key IS present with value None, so .get() still
+        # returns None and float(None) crashes. Guard explicitly.
+        raw_conf = criticism.get("confidence", 0)
+        if raw_conf is None:
+            raw_conf = 0
+        raw_conf = float(raw_conf)
         critic_conf = raw_conf / 100.0 if raw_conf > 1.0 else raw_conf
         state.critic_confidence = max(0.0, min(1.0, critic_conf))
 
@@ -105,11 +120,18 @@ class CriticAgent(BaseAgent):
         # Formula: 70 % critic judgment + 30 % retrieval rerank score.
         # This ensures a good answer from strong evidence scores higher
         # than a good answer from weak evidence.
-        retrieval_score = float(
-            state.retrieved_docs[0].get("rerank_score", 0.5)
-            if state.retrieved_docs else 0.5
-        )
+        #
+        # Same None-guard as above — a chunk dict can carry the key
+        # "rerank_score" with value None (e.g. reranker partially failed
+        # on one item) rather than omitting the key entirely.
+        top_doc_score = None
+        if state.retrieved_docs:
+            top_doc_score = state.retrieved_docs[0].get("rerank_score", 0.5)
+        if top_doc_score is None:
+            top_doc_score = 0.5
+        retrieval_score = float(top_doc_score)
         retrieval_score = max(0.0, min(1.0, retrieval_score))
+
         state.confidence_final = round(
             0.7 * state.critic_confidence + 0.3 * retrieval_score, 4
         )

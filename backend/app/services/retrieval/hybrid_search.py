@@ -1,5 +1,5 @@
 import asyncio
-from typing import List
+from typing import List, Optional
 from app.services.retrieval.vector_search import VectorSearchEngine
 from app.services.retrieval.keyword_search import keyword_manager
 from app.services.retrieval.reranker import bge_reranker
@@ -24,17 +24,19 @@ class HybridSearchEngine:
         query: str,
         user_id: str,
         top_k: int = 6,
-        rerank_pool_size: int = 20
+        rerank_pool_size: int = 20,
+        document_id: Optional[str] = None,
     ) -> List[dict]:
 
         # Run both searches in parallel, fetch more candidates
         vector_results, keyword_results = await asyncio.gather(
-            self.vector_engine.search(query, user_id, top_k=20),
-            self.keyword_engine.search(user_id, query, top_k=20)
+            self.vector_engine.search(query, user_id, top_k=20, document_id=document_id),
+            self.keyword_engine.search(user_id, query, top_k=20, document_id=document_id)
         )
 
         # DEBUG
         print(f"[HYBRID DEBUG] user_id: {user_id}")
+        print(f"[HYBRID DEBUG] document_id filter: {document_id}")
         print(f"[HYBRID DEBUG] vector results: {len(vector_results)}")
         print(f"[HYBRID DEBUG] keyword results: {len(keyword_results)}")
         print(f"[HYBRID DEBUG] BM25 indexed users: {list(self.keyword_engine.user_indexes.keys())}")

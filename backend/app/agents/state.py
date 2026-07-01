@@ -11,15 +11,25 @@ def _merge_error(a: str, b: str) -> str:
     two writes to `error` in one step. This reducer tells LangGraph how to
     merge them instead of raising InvalidUpdateError.
 
-    Rule: keep the most recent non-empty error; if both are non-empty,
-    concatenate with a separator so neither is silently dropped.
+    Rule: keep the most recent non-empty error; if both are non-empty AND
+    different, concatenate with a separator so neither is silently dropped.
     If both are empty/None, return empty string.
+
+    IMPORTANT: tool_node/answer_node/critic_node return the FULL AgentState
+    (not a partial dict), so they re-submit the unchanged `error` value on
+    every step even when nothing new went wrong. Without the a == b check
+    below, the same error string gets concatenated with itself repeatedly
+    (e.g. "X | X | X | X") as it passes through each subsequent node.
     """
     a = a or ""
     b = b or ""
-    if a and b:
-        return f"{a} | {b}"
-    return a or b
+    if not a:
+        return b
+    if not b:
+        return a
+    if a == b:
+        return a
+    return f"{a} | {b}"
 
 
 @dataclass
@@ -41,6 +51,9 @@ class AgentState:
     # ── Input ────────────────────────────────────────────────────────────
     question: str
     user_id: str
+    session_id: str = "default_session"   # used to look up Redis short-term history
+    rewritten_question: str = ""          # set by RewriterAgent; "" = not rewritten,
+                                           # downstream nodes fall back to `question`
 
     # ── Planner output ───────────────────────────────────────────────────
     plan: str = ""

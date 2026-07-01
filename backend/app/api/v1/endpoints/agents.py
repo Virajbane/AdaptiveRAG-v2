@@ -8,6 +8,8 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 class ChatRequest(BaseModel):
     """Chat request"""
     message: str
+    session_id: str = "default_session"   # NEW — identifies the conversation
+                                           # thread for short-term memory lookups
     top_k: int = 5
 
 class ChatResponse(BaseModel):
@@ -26,11 +28,12 @@ async def chat(
     Chat endpoint using agent orchestration
     
     Flows through:
-    1. Planner → Decides strategy
-    2. Retriever → Searches documents
-    3. Tool Agent → External tools
-    4. Critic → Validates answer
-    5. Answer Agent → Final response
+    1. Rewriter → Resolves context + fixes spelling
+    2. Planner → Decides strategy
+    3. Retriever → Searches documents
+    4. Tool Agent → External tools
+    5. Critic → Validates answer
+    6. Answer Agent → Final response
     """
     
     # Validate input
@@ -51,7 +54,8 @@ async def chat(
         orchestrator = AgentOrchestrator()
         result = await orchestrator.process(
             question=request.message,
-            user_id=user_id
+            user_id=user_id,
+            session_id=request.session_id,   # NEW
         )
         
         return ChatResponse(

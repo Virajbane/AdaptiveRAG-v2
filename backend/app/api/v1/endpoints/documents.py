@@ -79,6 +79,18 @@ async def process_document(doc_id: str, user_id: str, file_path: str, file_type:
 
     doc_queries = DocumentQueries(db)
 
+    # Stamp started_at the moment real work begins — this is what stale-job
+    # detection (get_stale_processing_documents) keys off of. If this
+    # background task dies before finishing (process restart/crash), the
+    # document stays at status="processing" with a started_at that quickly
+    # falls behind "now" by more than processing normally takes — making
+    # the stuck job detectable instead of indistinguishable from a job
+    # that's still legitimately in progress.
+    try:
+        await doc_queries.mark_processing_started(doc_id)
+    except Exception as e:
+        print(f"⚠️ Failed to stamp started_at for {doc_id}: {e}")
+
     try:
         processor = DocumentProcessor(db)
         result = await processor.process(file_path, file_type, user_id, doc_id)
@@ -111,6 +123,10 @@ async def process_document(doc_id: str, user_id: str, file_path: str, file_type:
         except Exception as inner:
             print(f"Failed to update document status: {inner}")
         print(f"❌ Error processing document {doc_id}: {e}")
+        # NOTE: file is deliberately NOT deleted on failure — this is what
+        # lets the /retry endpoint reprocess without asking the user to
+        # re-upload. It's only ever cleaned up on success (above) or by
+        # a future cleanup job for genuinely abandoned failed uploads.
 
 
 @router.get("")
@@ -135,3 +151,72 @@ async def list_documents(
         })
 
     return {"documents": documents}
+
+
+@router.post("/{doc_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_document(
+    doc_id: str,
+    user_id: str = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+    db=Depends(get_db)
+):
+    """
+    Re-queue a document that's either:
+      - status="failed" (processing raised an exception last time), or
+      - status="processing" but stale (started_at is old enough that the
+        background task almost certainly died mid-flight — see
+        DocumentQueries.get_stale_processing_documents)
+
+    Reuses the original file from storage_path, which is only ever
+    deleted on a SUCCESSFUL process_document() run — so a failed or
+    crashed job's file is still on disk to reprocess from, no
+    re-upload needed.
+    """
+    doc_queries = DocumentQueries(db)
+    doc = await doc_queries.get_document(doc_id, user_id)
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc["status"] not in ("failed", "processing"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document status is '{doc['status']}' — only 'failed' or "
+                   f"stuck 'processing' documents can be retried.",
+        )
+
+    if doc["status"] == "processing":
+        # Only allow retrying a "processing" doc if it actually looks
+        # stale — otherwise this could race a job that's genuinely still
+        # running and kick off a duplicate processing run for the same
+        # document.
+        stale_docs = await doc_queries.get_stale_processing_documents(user_id, timeout_minutes=10)
+        stale_ids = {str(d["_id"]) for d in stale_docs}
+        if doc_id not in stale_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="Document is still actively processing — not stale enough to retry yet.",
+            )
+
+    file_path = doc["storage_path"]
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=410,
+            detail="Original uploaded file is no longer available — please re-upload.",
+        )
+
+    background_tasks.add_task(
+        process_document,
+        doc_id=doc_id,
+        user_id=user_id,
+        file_path=file_path,
+        file_type=doc["file_type"],
+        db=db,
+    )
+
+    return {
+        "doc_id": doc_id,
+        "filename": doc["filename"],
+        "status": "processing",
+        "message": "Document re-queued for processing",
+    }

@@ -20,7 +20,9 @@ class PlannerAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
         """Plan the search strategy"""
 
-        prompt = PLANNER_PROMPT.format(question=state.question)
+        prompt = PLANNER_PROMPT.format(
+        question=state.rewritten_question or state.question
+        )
 
         try:
             response = await self.call_llm(prompt)

@@ -39,14 +39,20 @@ class AnswerAgent(BaseAgent):
             # the LLM), not all retrieved_docs - previously these could
             # diverge if Retriever's top_k ever changed independently of
             # AnswerAgent's top-6 slice.
+            #
+            # filename comes from RetrieverAgent's batched Mongo lookup
+            # (attached as doc['filename']). Falls back to a generic
+            # "Source N" label only if the lookup didn't run (e.g. db
+            # wasn't wired through) or the doc_id had no matching record.
             state.sources = [
                 {
                     "doc_id": doc["doc_id"],
                     "chunk_index": doc["chunk_index"],
+                    "filename": doc.get("filename") or f"Source {i}",
                     "text": doc["text"][:200],
                     "score": doc.get("rerank_score", doc.get("combined_score", 0.0)),
                 }
-                for doc in top_docs
+                for i, doc in enumerate(top_docs, 1)
             ]
 
             # Confidence fix: combined_score is the RRF fusion score, which

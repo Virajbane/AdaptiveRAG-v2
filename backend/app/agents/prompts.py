@@ -1,83 +1,70 @@
-PLANNER_PROMPT = """You are a planning agent. Output only a JSON object — no preamble, no explanation.
+PLANNER_PROMPT = """Classify this question. Output only JSON.
 
 Question: {question}
 
-Rules for "sources":
-- Use ["documents"] if the question can be answered from uploaded documents
-- Use ["web"] if the question needs current external facts (news, prices, live data)
-- Use ["documents", "web"] if it genuinely needs both
-- Default to ["documents"] when in doubt
+Rule:
+- Contains "my"/"I"/"me" about content (even with numbers) -> sources: ["documents"]
+- Public fact, unrelated to anything uploaded -> sources: ["web"]
+- Explicitly asks to compare "my"/uploaded data against external info -> sources: ["documents", "web"]
+- Unsure -> sources: ["documents"]
 
-Output exactly this JSON:
-{{
-  "intent": "...",
-  "sources": ["documents"],
-  "confidence": 0.85,
-  "strategy": "..."
-}}
+Q: "What is my total balance?" -> {{"intent": "lookup", "sources": ["documents"], "confidence": 0.95, "strategy": "personal data"}}
+Q: "Who is the PM of Japan?" -> {{"intent": "lookup", "sources": ["web"], "confidence": 0.9, "strategy": "public fact"}}
 
-JSON only. Start with {{"""
+Output JSON now:
+{{"intent": "...", "sources": [...], "confidence": 0.85, "strategy": "..."}}
 
-RETRIEVER_PROMPT = """
-You are the retriever agent. You have retrieved {doc_count} relevant documents.
+Start with {{"""
 
-Question: {question}
+REWRITE_SYSTEM_PROMPT = """Rewrite the question as one standalone, well-formed question.
 
-Retrieved documents:
-{docs}
+Rules:
+- Resolve pronouns/references using history (e.g. "what about X?" -> full topic + X).
+- Fix spelling only. Do not restructure the sentence.
+- Keep "my"/"I"/"me" EXACTLY as written. Never change to "your"/"you".
+- Never expand acronyms (CGPA, RAG, API stay as-is). Never guess what one means.
+- Keep the same command form (e.g. "summarize X" stays "summarize X", not "X summary").
+- Output ONLY the rewritten question. No explanation.
 
-Summarize what you found and how confident you are it answers the question.
+Example:
+Input: "wha t is my CGPA"
+Output: "What is my CGPA?"
 
-Format:
-{{
-  "summary": "...",
-  "confidence": 0.9,
-  "has_answer": true
-}}
+Example:
+Input: "summarixe the rag2.0 pdf"
+Output: "Summarize the RAG 2.0 PDF"
 """
 
-CRITIC_PROMPT = """You are a critic agent. Output only a JSON object — no preamble, no explanation.
+CRITIC_PROMPT = """Judge this answer. Output only JSON.
 
 Question: {question}
 Context: {context}
 Answer: {answer}
 
-Is the answer supported by the context and does it answer the question?
+Valid if the answer is supported by context and addresses the question.
 
-Output exactly this JSON:
-{{
-  "valid": true,
-  "confidence": 0.85,
-  "issues": [],
-  "needs_more_info": false
-}}
+{{"valid": true, "confidence": 0.85, "issues": [], "needs_more_info": false}}
 
-Rules:
-- "valid": true if the answer uses information from context to answer the question
-- "confidence": decimal 0.0 to 1.0 (examples: 0.9, 0.75, 0.5) — NEVER write 0 unless answer is completely fabricated
-- "issues": empty list [] if answer is acceptable
-- Be lenient — if the answer is mostly correct, mark valid true
+- confidence: 0.0-1.0, never 0 unless answer is fully fabricated
+- issues: [] if acceptable
+- Be lenient — mostly correct = valid true
 
-JSON only. Start with {{"""
+Start with {{"""
 
-ANSWER_PROMPT = """
-You are a helpful AI assistant. Answer the user's question using the sources provided below.
-
-Rules:
-- Read ALL sources carefully before answering
-- Extract every relevant detail from the sources — do not skip anything
-- If the answer spans multiple sources, combine them into one complete answer
-- Be specific — include names, numbers, dates, lists exactly as they appear in sources
-- If the sources genuinely do not contain the answer, say so plainly
-- Write plain text only — no JSON, no markdown, no "Sources:" section
+ANSWER_PROMPT = """Answer the question using only the sources below.
 
 Question: {question}
-
 Sources:
 {context}
 
-Your complete answer:
-"""
+Rules:
+- If the question asks for ONE fact (a number, date, name, status) -> answer in ONE short sentence. Nothing else.
+- If the question asks to summarize/list/explain/describe -> give a full answer covering the sources, no repeated facts.
+- Only state facts explicitly present in the sources. Never combine or guess related facts.
+- If the sources don't contain the answer, say so plainly.
+- Plain text only. No JSON, no markdown, no "Sources:" list — sources are shown separately by the app.
+
+Answer:"""
 
 TOOL_PROMPT = """
 You are the tool agent. Decide which tools to use.

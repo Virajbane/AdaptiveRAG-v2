@@ -1,13 +1,12 @@
 import { ProtectedRoute } from '@/components/security/ProtectedRoute';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import Dashboard from '@/components/layout/dashboard/Dashboard';
 
-// Note: AuthProvider is already provided once in the root app/layout.jsx.
-// Wrapping it again here would create a second, disconnected auth context —
-// removed so the whole app shares a single source of truth for the token/user.
-export default function DashboardRootLayout({ children }) {
+// All views (Chat, Library, Search, History) now live inside the single
+// Dashboard component as local-state view switches — no per-route pages.
+export default function DashboardRootLayout() {
   return (
     <ProtectedRoute>
-      <DashboardLayout>{children}</DashboardLayout>
+      <Dashboard />
     </ProtectedRoute>
   );
 }

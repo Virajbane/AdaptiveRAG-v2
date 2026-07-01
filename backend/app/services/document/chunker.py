@@ -14,7 +14,9 @@ class TextChunker:
         self.max_tokens = 150      # sweet spot: not too large, not too small
         self.overlap_tokens = 50   # carry context across chunks
 
-        # Priority order: try largest separator first, fall back to smaller
+        # Priority order: try largest separator first, fall back to smaller.
+        # No trailing "" (character) entry here — see _hard_split_by_tokens,
+        # which is the real fallback for text with no separators at all.
         self.separators = [
             "\n\n",   # paragraph break
             "\n",     # line break (handles bullets, resume lines)
@@ -24,7 +26,6 @@ class TextChunker:
             "; ",
             ", ",
             " ",      # word (last resort)
-            ""        # character (absolute fallback)
         ]
 
     def count_tokens(self, text: str) -> int:
@@ -51,16 +52,19 @@ class TextChunker:
             return []
 
         if not separators:
-            # Absolute fallback: split by characters
-            return [text[i:i+100] for i in range(0, len(text), 100)]
+            # No separator left to try (text has no spaces/punctuation at
+            # all — e.g. a long URL, hash, or base64 blob — and still
+            # exceeds max_tokens). Split on raw token boundaries instead
+            # of falling back to individual characters: character-level
+            # splits get rejoined with " ".join() in _merge_with_overlap,
+            # which would inject a space between every character and
+            # corrupt the text (e.g. "helloworld" -> "h e l l o w o r l d").
+            return self._hard_split_by_tokens(text)
 
         separator = separators[0]
         remaining = separators[1:]
 
-        if separator == "":
-            splits = list(text)
-        else:
-            splits = text.split(separator)
+        splits = text.split(separator)
 
         result = []
         for split in splits:
@@ -74,6 +78,19 @@ class TextChunker:
                 result.append(split)
 
         return result
+
+    def _hard_split_by_tokens(self, text: str) -> List[str]:
+        """
+        Absolute fallback for a single unbreakable span (no separators of
+        any kind) that still exceeds max_tokens. Encodes to tokens, slices
+        on token boundaries, decodes back — so pieces are correctly sized
+        without needing to be re-joined with spaces later.
+        """
+        tokens = self.encoding.encode(text)
+        return [
+            self.encoding.decode(tokens[i:i + self.max_tokens])
+            for i in range(0, len(tokens), self.max_tokens)
+        ]
 
     def _merge_with_overlap(self, splits: List[str]) -> List[str]:
         """

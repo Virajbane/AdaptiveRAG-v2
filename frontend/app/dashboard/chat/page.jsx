@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -13,6 +13,46 @@ const CHAT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — matches Ollama on CPU
 // If/when session persistence is added on the backend, the history rail
 // can come back — this was deliberately simplified for now.
 
+const INPUT_MIN_HEIGHT = 44; // px — matches old single-line input height
+const INPUT_MAX_HEIGHT = 160; // px — caps growth so the composer doesn't eat the thread
+
+// Mirrors the auto-resize behavior from the v0 chat pattern, trimmed down
+// (no min/max props plumbing) since this page only ever needs one size.
+function useAutoResizeTextarea() {
+  const textareaRef = useRef(null);
+
+  const adjustHeight = useCallback((reset) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    if (reset) {
+      textarea.style.height = `${INPUT_MIN_HEIGHT}px`;
+      return;
+    }
+
+    textarea.style.height = `${INPUT_MIN_HEIGHT}px`;
+    const newHeight = Math.max(
+      INPUT_MIN_HEIGHT,
+      Math.min(textarea.scrollHeight, INPUT_MAX_HEIGHT)
+    );
+    textarea.style.height = `${newHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = `${INPUT_MIN_HEIGHT}px`;
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => adjustHeight();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [adjustHeight]);
+
+  return { textareaRef, adjustHeight };
+}
+
 export default function ChatPage() {
   const { token } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -24,6 +64,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
   const timerRef = useRef(null);
+  const { textareaRef, adjustHeight } = useAutoResizeTextarea();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -44,14 +85,14 @@ export default function ChatPage() {
     return () => clearInterval(timerRef.current);
   }, [loading]);
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
+  const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
     const userMessage = { role: 'user', content: input };
     setMessages((prev) => [...prev, userMessage]);
     const currentInput = input;
     setInput('');
+    adjustHeight(true);
     setLoading(true);
 
     abortControllerRef.current = new AbortController();
@@ -103,6 +144,20 @@ export default function ChatPage() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    sendMessage();
+  };
+
+  // Enter sends, Shift+Enter inserts a newline — same convention as the
+  // v0 composer, applied to your existing send flow.
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
     }
   };
 
@@ -195,25 +250,38 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {/* ---------- Composer ---------- */}
+        {/* Was a single-line <input>; now an auto-resizing <textarea> so
+            multi-line questions don't get clipped. Same border/bg/focus
+            tokens as before — just a taller, growable field. */}
         <form onSubmit={handleSendMessage} className="border-t border-white/10 p-4">
-          <div className="mx-auto flex max-w-2xl gap-2">
-            <input
-              type="text"
+          <div className="mx-auto flex max-w-2xl items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                adjustHeight();
+              }}
+              onKeyDown={handleKeyDown}
               placeholder="Ask me anything about your documents…"
               disabled={loading}
-              className="flex-1 rounded-[11px] border border-white/10 bg-[#0F0F11]/60 px-4 py-2.5 text-[14px] text-white placeholder-[#52525B] outline-none transition-all duration-200 focus:border-[#34D399] focus:shadow-[0_0_0_3px_rgba(52,211,153,0.15)]"
+              className="flex-1 resize-none rounded-[11px] border border-white/10 bg-[#0F0F11]/60 px-4 py-2.5 text-[14px] text-white placeholder-[#52525B] outline-none transition-all duration-200 focus:border-[#34D399] focus:shadow-[0_0_0_3px_rgba(52,211,153,0.15)]"
+              style={{ height: `${INPUT_MIN_HEIGHT}px`, overflow: 'hidden' }}
             />
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="rounded-[11px] px-6 py-2.5 text-[14px] font-medium text-[#022C22] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(52,211,153,0.35)] disabled:translate-y-0 disabled:opacity-50 disabled:hover:shadow-none"
+              className="shrink-0 rounded-[11px] px-6 py-2.5 text-[14px] font-medium text-[#022C22] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(52,211,153,0.35)] disabled:translate-y-0 disabled:opacity-50 disabled:hover:shadow-none"
               style={{ background: '#34D399' }}
             >
               {loading ? `${elapsedSeconds}s…` : 'Send'}
             </button>
           </div>
+          <p className="mx-auto mt-1.5 max-w-2xl text-[11px]" style={{ color: '#52525B' }}>
+            Shift + Enter for a new line
+          </p>
         </form>
       </div>
 

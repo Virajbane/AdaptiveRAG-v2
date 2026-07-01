@@ -156,3 +156,5 @@ vector_store/
 # Uploaded documents
 uploads/
 data/uploads/
+
+repomix-output.xml
