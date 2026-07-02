@@ -32,7 +32,16 @@ class ToolAgent(BaseAgent):
                 )
                 
                 state.tool_results["web_search"] = result
-                print(f"[TOOL] Web search complete: {result.get('count', 0)} results")
+
+                if "error" in result:
+                    # Tool wasn't registered (not initialized) OR the search
+                    # provider itself errored (bad key, rate limit, network).
+                    # Surface this loudly — previously this was masked as
+                    # "0 results" via result.get('count', 0), which made a
+                    # missing tool indistinguishable from a real empty search.
+                    print(f"[TOOL] Web search FAILED: {result['error']}")
+                else:
+                    print(f"[TOOL] Web search complete: {result.get('count', 0)} results")
 
         except Exception as e:
             print(f"[TOOL] Tool execution error: {e}")

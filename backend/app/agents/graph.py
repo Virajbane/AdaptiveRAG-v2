@@ -74,6 +74,7 @@ from app.agents.answer import AnswerAgent
 from app.agents.rewriter import RewriterAgent
 from app.services.llm.provider import LLMProvider
 from app.config.settings import settings
+from langsmith import traceable
 
 MAX_RETRIES = 2
 
@@ -112,7 +113,8 @@ def build_agent_graph(db=None):
         if result.error:
             update["error"] = result.error
         return update
-
+    
+    @traceable(name="planner_node", run_type="chain")
     async def planner_node(state: AgentState) -> dict:
         t0 = time.perf_counter()
         result = await planner.run(state.copy())
@@ -125,7 +127,8 @@ def build_agent_graph(db=None):
         if result.error:
             update["error"] = result.error
         return update
-
+    
+    @traceable(name="retriever_node", run_type="retriever")
     async def retriever_node(state: AgentState) -> dict:
         t0 = time.perf_counter()
         result = await retriever.run(state.copy())
@@ -141,7 +144,8 @@ def build_agent_graph(db=None):
 
     async def join_node(state: AgentState) -> dict:
         return {}
-
+    
+    @traceable(name="grader_node", run_type="chain")
     async def grader_node(state: AgentState) -> AgentState:
         t0 = time.perf_counter()
         result = await grader.run(state.copy())

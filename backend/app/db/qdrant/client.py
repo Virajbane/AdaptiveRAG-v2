@@ -147,13 +147,11 @@ class QdrantVectorDB:
         """Delete all vectors for a document"""
         result = self.client.delete(
             collection_name=self.collection_name,
-            points_selector={
-                "filter": {
-                    "must": [
-                        {"key": "doc_id", "match": {"value": doc_id}},
-                        {"key": "user_id", "match": {"value": user_id}}
-                    ]
-                }
-            }
+            points_selector=Filter(
+                must=[
+                    FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                ]
+            )
         )
-        return result.deleted
+        return result.status

@@ -24,8 +24,8 @@ export default function Sidebar({ view, setView, documents = [], onNewQuery }) {
           </svg>
         </div>
         <div>
-          <div style={S.brandName}>Project Alpha</div>
-          <div style={S.brandSub}>Active Knowledge Base</div>
+          <div style={S.brandName}>Adaptive-RAG</div>
+          <div style={S.brandSub}>Multi Agent AI</div>
         </div>
       </div>
 

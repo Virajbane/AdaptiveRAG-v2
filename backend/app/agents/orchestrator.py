@@ -104,6 +104,7 @@ class AgentOrchestrator:
         result = {
             "answer": final_state.answer,
             "sources": final_state.sources,
+            "sources_needed": final_state.sources_needed,
             # Defensive default: avoids a TypeError crash if a pipeline
             # path ever leaves confidence_final unset (None) while still
             # producing a usable answer.

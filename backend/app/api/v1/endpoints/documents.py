@@ -6,6 +6,9 @@ from datetime import datetime
 from app.middleware.auth import get_current_user
 from app.db.mongodb.queries import DocumentQueries
 from app.db.mongodb.client import get_db
+from app.db.qdrant.client import QdrantVectorDB
+
+qdrant = QdrantVectorDB()
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -220,3 +223,41 @@ async def retry_document(
         "status": "processing",
         "message": "Document re-queued for processing",
     }
+
+@router.delete("/{doc_id}", status_code=status.HTTP_200_OK)
+async def delete_document(
+    doc_id: str,
+    user_id: str = Depends(get_current_user),
+    db=Depends(get_db)
+):
+    """
+    Delete a document: removes the Qdrant vectors, the Mongo record, and
+    the on-disk file if it still exists (e.g. a failed job that was never
+    cleaned up — see process_document's note on why failed files are kept
+    around for /retry).
+    """
+    doc_queries = DocumentQueries(db)
+    doc = await doc_queries.get_document(doc_id, user_id)
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Remove Qdrant vectors first — a delete failing midway should never
+    # leave searchable vectors for a doc Mongo no longer lists.
+    try:
+        await qdrant.delete_document_vectors(doc_id=doc_id, user_id=user_id)
+    except Exception as e:
+        print(f"⚠️ Failed to delete Qdrant vectors for {doc_id}: {e}")
+
+    storage_path = doc.get("storage_path")
+    if storage_path and os.path.exists(storage_path):
+        try:
+            os.remove(storage_path)
+        except Exception as e:
+            print(f"⚠️ Failed to delete file {storage_path}: {e}")
+
+    deleted = await doc_queries.delete_document(doc_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return {"doc_id": doc_id, "status": "deleted"}
