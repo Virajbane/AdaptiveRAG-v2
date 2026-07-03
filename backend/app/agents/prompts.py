@@ -41,13 +41,27 @@ Question: {question}
 Context: {context}
 Answer: {answer}
 
-Valid if the answer is supported by context and addresses the question.
+Check each specific fact in the answer (names, numbers, dates, statuses) against
+the context, one at a time.
+
+Mark invalid if ANY of the following are true:
+- The answer states a fact that contradicts the context (e.g. wrong date, wrong
+  person, wrong number), even if it's a real, plausible-sounding fact.
+- The answer includes a specific name/number/date not present anywhere in the
+  context.
+- The answer answers a different question than the one asked.
+
+Do not be lenient about factual contradictions just because the answer is
+well-written or mostly on-topic. A confident, fluent answer that contradicts
+its own context is invalid, not "mostly correct."
 
 {{"valid": true, "confidence": 0.85, "issues": [], "needs_more_info": false}}
 
-- confidence: 0.0-1.0, never 0 unless answer is fully fabricated
-- issues: [] if acceptable
-- Be lenient — mostly correct = valid true
+- confidence should reflect how certain you are the answer is fully consistent
+  with the context — a contradiction found anywhere means confidence near 0.0,
+  not just "not 1.0"
+- issues: list each specific contradiction or unsupported fact found, empty
+  list only if none found
 
 Start with {{"""
 
@@ -61,7 +75,8 @@ Rules:
 - If the question asks for ONE fact (a number, date, name, status) -> answer in ONE short sentence. Nothing else.
 - If the question asks to summarize/list/explain/describe -> give a full answer covering the sources, no repeated facts.
 - Only state facts explicitly present in the sources. Never combine or guess related facts.
-- If the sources don't contain the answer, say so plainly.
+- You have no knowledge outside the sources above, even about famous people, well-known events, or things you're certain about. If a name, date, or number does not appear in the sources, you do not know it for the purposes of this answer.
+- If the sources don't contain the answer, say so plainly rather than filling the gap with anything you already know.
 - Plain text only. No JSON, no markdown, no "Sources:" list — sources are shown separately by the app.
 
 Answer:"""

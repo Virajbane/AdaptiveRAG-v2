@@ -1,7 +1,7 @@
 # eval/config.py
 import os
 
-JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "qwen2.5:0.5b")
+JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "qwen2.5:7b")
 EMBEDDING_MODEL = os.getenv("EVAL_EMBEDDING_MODEL", "nomic-embed-text:latest")
 
 THRESHOLDS = {

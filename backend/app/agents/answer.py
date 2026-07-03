@@ -6,25 +6,72 @@ from app.agents.prompts import ANSWER_PROMPT
 class AnswerAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
 
-        if not state.retrieved_docs:
+        # 2026-07-03 fix: ToolAgent stores web/tool output in
+        # state.tool_results, but nothing here ever read it -- the LLM
+        # was only ever shown state.retrieved_docs, so a successful web
+        # search (e.g. "who won the most recent F1 race?") was silently
+        # discarded and the model answered off irrelevant/empty document
+        # chunks instead ([ANSWER] logs always said "Using N top
+        # documents", never anything about web results, even on
+        # web-routed questions where a search had just completed).
+        # Build a separate tool-results block and include it whenever
+        # present, regardless of whether documents were also retrieved --
+        # personal+comparison questions (routing_005-style) need both.
+        web_result = state.tool_results.get("web_search") if state.tool_results else None
+        tool_context = ""
+        web_result_count = 0
+        if web_result and "error" not in web_result:
+            entries = web_result.get("results", [])
+            web_result_count = len(entries)
+            if entries:
+                formatted = []
+                for i, entry in enumerate(entries, 1):
+                    title = entry.get("title", "")
+                    snippet = entry.get("snippet") or entry.get("content") or ""
+                    url = entry.get("url", "")
+                    formatted.append(f"[Web {i}] {title}\n{snippet}\n{url}".strip())
+                tool_context = "\n\n".join(formatted)
+
+        # 2026-07-03 fix: retrieval runs unconditionally upstream of the
+        # planner's routing decision, so state.retrieved_docs is always
+        # populated -- even for web-only questions where the Planner
+        # explicitly decided sources_needed=['web'] and never asked for
+        # documents. Previously AnswerAgent ignored that decision and
+        # always included top_docs regardless, so a web-only question
+        # like "who won the most recent F1 race?" got 5 near-zero-
+        # relevance document chunks (e.g. rerank scores ~0.0001, about
+        # accessibility/coroutines/mobile AI) mixed into the same
+        # context as the real web results. Handing a local LLM unrelated
+        # noise next to legitimate facts is a plausible contributor to
+        # it blending/contradicting itself (observed: HallucinationMetric
+        # flagging the web-grounded answer as disagreeing with context).
+        # Respect the router's decision the same way tool_context already
+        # does: only include doc context when 'documents' was requested.
+        docs_wanted = "documents" in (state.sources_needed or [])
+        top_docs = state.retrieved_docs[:6] if docs_wanted else []
+
+        if not top_docs and not tool_context:
             state.answer = (
                 "I don't have any documents to search. "
                 "Please upload documents first, then ask your question."
             )
             state.sources = []
             state.confidence_final = state.confidence * 0.3
-            print("[ANSWER] No documents - returning explicit message")
+            print("[ANSWER] No documents and no tool results - returning explicit message")
             return state
 
-        # Use top 6 docs, full text — no truncation
-        top_docs = state.retrieved_docs[:6]
-
-        context = "\n\n".join([
+        doc_context = "\n\n".join([
             f"[Source {i}]\n{doc['text']}"
             for i, doc in enumerate(top_docs, 1)
         ])
 
-        print(f"[ANSWER] Using {len(top_docs)} top documents")
+        context_parts = [p for p in (doc_context, tool_context) if p]
+        context = "\n\n".join(context_parts) if context_parts else "(no context available)"
+
+        print(
+            f"[ANSWER] Using {len(top_docs)} top documents"
+            + (f" + {web_result_count} web results" if tool_context else "")
+        )
 
         try:
             prompt = ANSWER_PROMPT.format(
@@ -55,6 +102,24 @@ class AnswerAgent(BaseAgent):
                 for i, doc in enumerate(top_docs, 1)
             ]
 
+            # Surface web results as sources too, so citations/UI reflect
+            # what actually informed the answer -- previously these were
+            # used in the prompt (once the fix above wired them in) but
+            # never appeared in state.sources, making web-grounded answers
+            # look document-only to anything consuming state.sources.
+            if web_result and "error" not in web_result:
+                state.sources.extend([
+                    {
+                        "doc_id": None,
+                        "chunk_index": None,
+                        "filename": entry.get("title") or entry.get("url") or f"Web result {i}",
+                        "text": (entry.get("snippet") or entry.get("content") or "")[:200],
+                        "score": None,
+                        "url": entry.get("url"),
+                    }
+                    for i, entry in enumerate(web_result.get("results", []), 1)
+                ])
+
             # Confidence fix: combined_score is the RRF fusion score, which
             # is rank-based and deliberately tiny/tightly-clustered
             # (RRF_K=60 means scores live in roughly the 0.01-0.05 range
@@ -68,9 +133,19 @@ class AnswerAgent(BaseAgent):
             # rerank_score (the BGE cross-encoder score) carries real
             # signal about retrieval relevance and should be used instead.
             # Falls back to combined_score only if reranking didn't run.
+            #
+            # 2026-07-03: use top_docs (the docs actually sent to the LLM)
+            # rather than all of state.retrieved_docs -- now that doc
+            # context is excluded entirely for web-only questions, using
+            # the full retrieved_docs list here would still drag
+            # confidence down using near-zero scores from chunks that
+            # were never shown to the model. When top_docs is empty
+            # (web-only), avg_doc_score is 0 and confidence rests solely
+            # on the planner's confidence, which is correct since there's
+            # no retrieval signal to speak of.
             scored_docs = [
                 doc.get("rerank_score", doc.get("combined_score", 0.0))
-                for doc in state.retrieved_docs
+                for doc in top_docs
             ]
             avg_doc_score = sum(scored_docs) / len(scored_docs) if scored_docs else 0.0
 
@@ -87,6 +162,15 @@ class AnswerAgent(BaseAgent):
             print(f"[ANSWER] Confidence: {state.confidence_final:.2f}")
 
         except Exception as e:
+            # 2026-07-03: this was swallowing the real cause entirely --
+            # state.error was set but nothing printed it, so a failure
+            # here (e.g. prompt exceeding the model's context window
+            # after web results were added to context, a malformed
+            # ANSWER_PROMPT.format() call, or an LLM/connection error)
+            # was indistinguishable from any other failure. Print it so
+            # it's visible in eval logs instead of just "Sorry, I
+            # couldn't generate an answer" with no explanation.
+            print(f"[ANSWER] Answer generation FAILED: {type(e).__name__}: {e}")
             state.error = f"Answer agent error: {str(e)}"
             state.answer = "Sorry, I couldn't generate an answer."
             state.sources = []
