@@ -51,13 +51,36 @@ class AnswerAgent(BaseAgent):
         top_docs = state.retrieved_docs[:3] if docs_wanted else []
 
         if not top_docs and not tool_context:
-            state.answer = (
-                "I don't have any documents to search. "
-                "Please upload documents first, then ask your question."
-            )
+            web_error = web_result.get("error") if web_result else None
+            has_any_retrieved_docs = bool(state.retrieved_docs)
+
+            if not has_any_retrieved_docs and not web_error:
+                message = (
+                    "I don't have any documents to search. "
+                    "Please upload documents first, then ask your question."
+                )
+            elif has_any_retrieved_docs and web_error:
+                message = (
+                    "I found some content in your documents, but it wasn't a strong "
+                    "enough match to answer confidently, and the web search I tried "
+                    "as backup failed due to a connection error. Try rephrasing, or "
+                    "ask again in a moment."
+                )
+            elif has_any_retrieved_docs and not web_error:
+                message = (
+                    "I found some content in your documents, but it wasn't a strong "
+                    "enough match to confidently answer this question."
+                )
+            else:  # no retrieved docs, web errored
+                message = (
+                    "I don't have relevant documents for this, and the web search I "
+                    "tried failed due to a connection error. Please try again."
+                )
+
+            state.answer = message
             state.sources = []
             state.confidence_final = state.confidence * 0.3
-            print("[ANSWER] No documents and no tool results - returning explicit message")
+            print(f"[ANSWER] No usable content — has_docs={has_any_retrieved_docs}, web_error={bool(web_error)}")
             return state
 
         doc_context = "\n\n".join([
