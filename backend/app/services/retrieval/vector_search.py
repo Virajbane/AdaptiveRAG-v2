@@ -29,7 +29,7 @@ class VectorSearchEngine:
             List of similar chunks with scores
         """
         # Embed the query
-        query_embedding = await self.embedder.embed_text(query)
+        query_embedding = await self.embedder.embed_text(query, task="search_query")
 
         # Search Qdrant
         results = await self.vector_db.search(

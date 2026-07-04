@@ -8,21 +8,23 @@ class PDFParser:
     
     @staticmethod
     def parse(file_path: str) -> str:
-            text = ""
-            try:
-                doc = fitz.open(file_path)
-                for page in doc:
-                    page_text = page.get_text()
-                    if page_text.strip():
-                        text += page_text + "\n"
-                doc.close()
-                # DEBUG - remove after testing
-                print(f"[PARSER DEBUG] Total chars: {len(text)}")
-                print(f"[PARSER DEBUG] Newline count: {text.count(chr(10))}")
-                print(f"[PARSER DEBUG] First 300 chars: {repr(text[:300])}")
-                return text
-            except Exception as e:
-                raise ValueError(f"Error parsing PDF: {str(e)}")
+        text = ""
+        try:
+            doc = fitz.open(file_path)
+            for page in doc:
+                blocks = page.get_text("blocks")  # (x0,y0,x1,y1, text, block_no, ...)
+                blocks.sort(key=lambda b: (round(b[1]), b[0]))  # reading order: top-to-bottom, left-to-right
+                for b in blocks:
+                    block_text = b[4].strip()
+                    if block_text:
+                        text += block_text + "\n\n"  # real paragraph boundary between blocks
+            doc.close()
+            print(f"[PARSER DEBUG] Total chars: {len(text)}")
+            print(f"[PARSER DEBUG] Block-separated paragraph count: {text.count(chr(10)+chr(10))}")
+            print(f"[PARSER DEBUG] First 300 chars: {repr(text[:300])}")
+            return text
+        except Exception as e:
+            raise ValueError(f"Error parsing PDF: {str(e)}")
         
 
 

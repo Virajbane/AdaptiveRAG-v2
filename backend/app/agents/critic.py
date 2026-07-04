@@ -4,6 +4,32 @@ from app.agents.base import BaseAgent
 from app.agents.state import AgentState
 from app.agents.prompts import CRITIC_PROMPT
 
+# --------------------------------------------------------------------------
+# 2026-07-04 bug: Critic scoring a failed generation as if it were valid
+#
+# Observed on "What is the full title of this paper?": AnswerAgent's
+# /api/generate call hit a 500 (Ollama connection reset), was caught in
+# AnswerAgent's except block, and correctly set state.answer to the
+# fallback string with state.error set and confidence_final = 0.0.
+#
+# CriticAgent's existing guard only checks for an EMPTY answer or the
+# "Searching for relevant information..." placeholder — it has no check
+# for state.error or for the fallback failure string. So it went ahead
+# and sent "Sorry, I couldn't generate an answer." to the judge LLM,
+# which rated it valid=True (not unreasonable in isolation — it's an
+# honest, non-hallucinating statement) with confidence 0.85, and then
+# OVERWROTE AnswerAgent's correct confidence_final=0.0 with a blended
+# score of 0.6241. The user saw a failed answer reported with 62%
+# confidence, masking a real upstream failure instead of surfacing it.
+#
+# Fix: short-circuit before the LLM call whenever state.error is set OR
+# state.answer matches the known fallback string, and force
+# confidence_final back to 0.0. This is a hard gate, not a scoring
+# adjustment — there is nothing for the Critic to meaningfully judge
+# when generation itself never produced real content.
+# --------------------------------------------------------------------------
+_FAILED_ANSWER = "Sorry, I couldn't generate an answer."
+
 
 class CriticAgent(BaseAgent):
     """
@@ -75,6 +101,27 @@ class CriticAgent(BaseAgent):
             state.error = "CriticAgent called before AnswerAgent produced an answer"
             state.is_valid = False
             print("[CRITIC] Skipped — no answer to validate")
+            return state
+
+        # Guard: don't score a KNOWN FAILURE as if it were a real answer.
+        # state.error being set means AnswerAgent already hit an exception
+        # (LLM crash, timeout, malformed prompt, etc.) and deliberately
+        # set confidence_final = 0.0 itself. Running the fallback string
+        # through the judge LLM produces a misleadingly "valid, confident"
+        # score for an answer that was never actually generated — the
+        # judge is rating the honesty of an apology, not the quality of
+        # a grounded answer. Skip scoring entirely and preserve the 0.0
+        # AnswerAgent already set (don't just re-set it here in case a
+        # future caller relies on distinguishing "never scored" states).
+        if state.error or state.answer.strip() == _FAILED_ANSWER:
+            state.is_valid = False
+            state.validation_issues = ["Answer generation failed upstream; not evaluated"]
+            state.critic_confidence = 0.0
+            state.confidence_final = 0.0
+            print(
+                f"[CRITIC] Skipped — answer generation failed upstream "
+                f"(state.error={state.error!r}), forcing confidence_final=0.0"
+            )
             return state
 
         context = "\n".join([

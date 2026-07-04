@@ -1,20 +1,21 @@
-PLANNER_PROMPT = """Classify this question. Output only JSON.
-
-Question: {question}
+PLANNER_PROMPT = """Classify the question below. Output only ONE JSON object.
 
 Rule:
-- Contains "my"/"I"/"me" about content (even with numbers) -> sources: ["documents"]
+- Contains "my"/"I"/"me"/"our" about content (even with numbers) -> sources: ["documents"]
 - Public fact, unrelated to anything uploaded -> sources: ["web"]
 - Explicitly asks to compare "my"/uploaded data against external info -> sources: ["documents", "web"]
 - Unsure -> sources: ["documents"]
 
-Q: "What is my total balance?" -> {{"intent": "lookup", "sources": ["documents"], "confidence": 0.95, "strategy": "personal data"}}
-Q: "Who is the PM of Japan?" -> {{"intent": "lookup", "sources": ["web"], "confidence": 0.9, "strategy": "public fact"}}
+Example (format only — ignore the topic, do not repeat it in your output):
+Q: "[placeholder personal question]" -> {{"intent": "lookup", "sources": ["documents"], "confidence": 0.95, "strategy": "personal data"}}
+Q: "[placeholder public-fact question]" -> {{"intent": "lookup", "sources": ["web"], "confidence": 0.9, "strategy": "public fact"}}
+
+Output exactly one JSON object, for the question below only. Do not output the examples above, do not output a list, do not output more than one object.
+
+Question: {question}
 
 Output JSON now:
-{{"intent": "...", "sources": [...], "confidence": 0.85, "strategy": "..."}}
-
-Start with {{"""
+{{"""
 
 REWRITE_SYSTEM_PROMPT = """Rewrite the question as one standalone, well-formed question.
 
@@ -65,19 +66,29 @@ its own context is invalid, not "mostly correct."
 
 Start with {{"""
 
-ANSWER_PROMPT = """Answer the question using only the sources below.
-
-Question: {question}
-Sources:
-{context}
-
-Rules:
-- If the question asks for ONE fact (a number, date, name, status) -> answer in ONE short sentence. Nothing else.
+ANSWER_PROMPT = """Rules:
+- If the question asks for ONE fact (a number, date, name, status, winner, result) -> answer in ONE short sentence. Do not add related facts, records, history, or trivia, even if present in the sources.
 - If the question asks to summarize/list/explain/describe -> give a full answer covering the sources, no repeated facts.
 - Only state facts explicitly present in the sources. Never combine or guess related facts.
 - You have no knowledge outside the sources above, even about famous people, well-known events, or things you're certain about. If a name, date, or number does not appear in the sources, you do not know it for the purposes of this answer.
 - If the sources don't contain the answer, say so plainly rather than filling the gap with anything you already know.
+- Sources are labeled [Source N] (from the user's own uploaded document) or [Web N] (general web search results, NOT from the user's document). If a question asks what a specific paper/document states, uses, or reports, and [Source N] and [Web N] disagree or describe different things, ALWAYS trust [Source N] — [Web N] results may describe an unrelated tool, paper, or topic that merely shares similar wording with the question, not the actual contents of the user's document. Only use [Web N] as the answer when no [Source N] entry addresses the question at all.
 - Plain text only. No JSON, no markdown, no "Sources:" list — sources are shown separately by the app.
+- IMPORTANT: The example below is a FORMAT DEMONSTRATION ONLY, using a placeholder topic. Never reuse its subject matter in your real answer, even if your real sources run out or get cut off.
+
+Example (format only — ignore the topic):
+Question: "What color is [X]?"
+Sources: [mentions that [X] is blue]
+Answer: "[X] is blue."
+
+---
+
+Using ONLY the sources below, answer the question that follows. Ignore the example above entirely — it is not related to this question.
+
+Sources:
+{context}
+
+Question: {question}
 
 Answer:"""
 

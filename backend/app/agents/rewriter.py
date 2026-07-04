@@ -21,9 +21,11 @@ Design notes:
     "not rewritten" — downstream nodes (planner, retriever) must use
     `state.rewritten_question or state.question`.
   - On any failure (LLM error, empty/unusable response, a rewrite
-    that drops a personal-reference word present in the original, or
-    a rewrite that diverges too far from the original's actual
-    content), state.rewritten_question stays "" so callers fall back
+    that drops a personal-reference word, a numeral/quantifier, or an
+    acronym present in the original, a rewrite that diverges too far
+    from the original's actual content, or a rewrite that resembles a
+    PRIOR turn in history more than it resembles the current
+    question), state.rewritten_question stays "" so callers fall back
     to state.question automatically. This follows BaseAgent.run()'s
     existing convention: _execute() catches its own soft failures and
     never raises for "just use the fallback" cases; only unexpected
@@ -33,35 +35,88 @@ Design notes:
 2026-06-30 bug note:
   - The fast model was observed rewriting "What are my skills mentioned
     in the docs?" into "What specific skills are listed in the
-    documentation?" — dropping "my" entirely (not converting it to
-    "your", which the prompt already banned) and swapping "docs" for a
+    documentation?" — dropping "my" entirely and swapping "docs" for a
     synonym. This silently strips the signal the Planner uses to route
     to ["documents"], causing misrouting to ["web"]. Prompt rules were
-    tightened to explicitly ban deletion/synonym-substitution (not just
-    person-swapping), and a code-level safety net
-    (_dropped_personal_reference) was added as a backstop independent
-    of prompt compliance, since this is a fast model and prompt-only
-    guarantees weren't reliable enough for something this consequential
-    downstream.
+    tightened, and a code-level safety net (_dropped_personal_reference)
+    was added as a backstop independent of prompt compliance.
 
 2026-07-02 bug note:
   - Separately, the fast model was observed rewriting "Who won the most
     recent Formula 1 race?" into "Who is the most successful driver
-    among the top five drivers of all time?" — not a spelling fix or a
-    personal-reference drop, but a full hallucinated substitute
-    question on the same general topic. _dropped_personal_reference
-    doesn't catch this (no personal reference involved at all), so a
-    second, broader backstop (_diverged_too_much) was added: it flags
-    rewrites whose overall text is no longer substantially similar to
-    the original, regardless of *which* words changed. This is
-    deliberately generic rather than another keyword-specific check,
-    since the underlying problem (small model not reliably following
-    "do not restructure the sentence") isn't limited to any one phrase
-    pattern and hand-coding each observed case doesn't scale.
+    among the top five drivers of all time?" — a full hallucinated
+    substitute question on the same general topic.
+    _dropped_personal_reference doesn't catch this, so a second,
+    broader backstop (_diverged_too_much) was added: it flags rewrites
+    whose overall text is no longer substantially similar to the
+    original, regardless of *which* words changed.
+
+  - Originally, _diverged_too_much only ran when `not history`. This
+    assumption broke down during multi-turn eval sessions (see below).
+
+2026-07-04 bug note (first pass):
+  - During a sequential 20-question eval run, the fast model rewrote
+    "According to the paper, what are the estimated annual losses from
+    insurance fraud in the US and UK?" into a near-verbatim COPY of the
+    previous assistant ANSWER (the paper's title/authors/affiliations
+    block). Because `not history` gated _diverged_too_much off, the
+    check never ran. Fixed by making _diverged_too_much run
+    unconditionally, and by adding _matches_prior_question, which
+    compared the rewrite against each prior USER turn via character
+    similarity (SequenceMatcher).
+
+  - Separately, "What does FNOL stand for?" was rewritten to "What is
+    the abbreviation for 'federal net of losses'?" — violating the
+    prompt's "never expand acronyms" rule and corrupting retrieval.
+    No code-level backstop existed for this yet, only the prompt rule.
+
+2026-07-04 bug note (second pass — this revision):
+  - The character-similarity approach in _matches_prior_question turned
+    out to be the wrong tool. In a later eval run, the rewriter
+    paraphrased the PRIOR question rather than copying it verbatim:
+    prior turn "Which two organizations are the authors affiliated
+    with?" became rewrite "According to the paper, which two
+    organizations are mentioned as affiliated with the authors?" for a
+    question that should have been about annual fraud losses. This is
+    semantically the same failure as the original bug (regurgitating
+    the wrong turn), but reordering + added preamble drops
+    SequenceMatcher's ratio well below the 0.85 threshold, so the check
+    didn't fire. Worse, the very first occurrence of this failure class
+    was copying a prior ASSISTANT answer, not a user question at all —
+    and the old check only ever looked at user turns, so that case was
+    never covered by design, not just by threshold miscalibration.
+
+    Replaced _matches_prior_question with _matches_prior_turn, which:
+      1. Checks BOTH user and assistant turns in history (a hallucinated
+         rewrite can regurgitate either).
+      2. Uses word-set overlap (order-independent, paraphrase-tolerant)
+         instead of character sequence similarity.
+      3. Compares RELATIVELY: does this rewrite share more content with
+         a prior turn than it shares with the CURRENT question it's
+         supposed to be a rewrite of? A legitimate rewrite — even one
+         that pulls entities from history to resolve a follow-up —
+         should still resemble the current question at least as much
+         as any single prior turn, since it's derived from the current
+         question's own content plus resolved references. A
+         hallucinated substitute fails that comparison because it isn't
+         derived from the current question at all.
+
+    Also added, same session:
+      - _dropped_quantifier: catches silent numeral/quantifier loss
+        (e.g. "two techniques" -> "the technique"), observed as a
+        subtler drift pattern than outright hallucination — not
+        gross enough to trip _diverged_too_much, but still corrupting
+        the question's actual claim.
+      - _dropped_or_altered_acronym: a code-level backstop for the
+        FNOL-expansion failure above, which previously had only the
+        prompt rule ("never expand acronyms") and no deterministic
+        check — consistent with the project's existing pattern
+        (_dropped_personal_reference) of not trusting prompt-only
+        compliance from the fast model for anything consequential
+        downstream.
 """
 
 import re
-from difflib import SequenceMatcher
 
 import app.services.memory.manager as mm_module
 from app.agents.base import BaseAgent
@@ -102,15 +157,39 @@ RIGHT Output: "Who won the most recent Formula 1 race?"
 MAX_HISTORY_TURNS = 3
 
 _PERSONAL_REF = re.compile(r"\b(my|i|me)\b", re.IGNORECASE)
+_QUANTIFIER_RE = re.compile(r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b", re.IGNORECASE)
+_ACRONYM_RE = re.compile(r"\b[A-Z]{2,6}\b")
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Minimal function-word list for word-overlap comparisons. Deliberately
+# short — this only exists to stop overlap ratios being inflated by
+# words like "the"/"is"/"what" that nearly every question shares
+# regardless of topic. Content words (nouns, numerals, domain terms)
+# are what should drive the comparison.
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "what", "which", "who", "whom", "how", "why", "when", "where",
+    "does", "do", "did", "this", "that", "these", "those",
+    "of", "in", "on", "to", "for", "and", "or", "as", "with", "from",
+    "by", "at", "it", "its", "according", "paper", "please",
+}
 
 # Below this overall similarity ratio, a rewrite is treated as having
 # replaced the question's actual content rather than just cleaning it
-# up. Legitimate spelling/grammar fixes and reasonable context
-# resolution (expanding "what about X?" using history) both keep this
-# fairly high, since most of the original characters survive; a
-# hallucinated substitute question does not. Tune based on observed
-# false positives/negatives in logs.
+# up. Tune based on observed false positives/negatives in logs.
 _DIVERGENCE_SIMILARITY_THRESHOLD = 0.4
+
+# A rewrite is flagged as "resembles a prior turn instead of the
+# current question" if its word-overlap with that prior turn exceeds
+# its word-overlap with the current original question by at least this
+# margin, AND the prior-turn overlap itself clears the minimum below.
+# The margin (not an absolute cutoff alone) is what makes this
+# paraphrase-tolerant: legitimate follow-up rewrites can share real
+# overlap with recent history (that's the point of context resolution)
+# as long as they still resemble the current question at least as
+# much. Needs tuning against continued eval observations.
+_PRIOR_TURN_OVERLAP_MARGIN = 0.10
+_PRIOR_TURN_MIN_OVERLAP = 0.35
 
 
 def _format_history(history: list[dict]) -> str:
@@ -142,12 +221,53 @@ def _dropped_personal_reference(original: str, rewritten: str) -> bool:
     If the user's original question contains "my"/"I"/"me" and the
     rewritten version doesn't contain any of them, the rewrite has
     stripped a signal the Planner depends on for routing to
-    ["documents"] — even if the model didn't do the more obvious
-    "your"/"you" swap the prompt already bans. Deliberately narrow: it
-    only checks for this one known failure mode, not general rewrite
-    drift, to avoid false-positiving on legitimate rewrites.
+    ["documents"]. Deliberately narrow: only this one known failure
+    mode, to avoid false-positiving on legitimate rewrites.
     """
     return bool(_PERSONAL_REF.search(original)) and not _PERSONAL_REF.search(rewritten)
+
+
+def _dropped_quantifier(original: str, rewritten: str) -> bool:
+    """
+    Catches silent numeral/quantifier loss — e.g. "What two techniques
+    are combined...?" rewritten as "Summarize the technique used...",
+    dropping "two" (and pluralizing away the fact that multiple
+    techniques were asked about). This is subtler than outright
+    hallucination: the rewrite is topically on-target and won't trip
+    _diverged_too_much, but it silently changes the actual claim being
+    asked about, which can bias retrieval toward a single technique
+    instead of both.
+
+    Every quantifier word/digit present in the original must survive
+    into the rewrite unchanged (order doesn't matter).
+    """
+    original_q = set(m.lower() for m in _QUANTIFIER_RE.findall(original))
+    if not original_q:
+        return False
+    rewritten_q = set(m.lower() for m in _QUANTIFIER_RE.findall(rewritten))
+    return not original_q.issubset(rewritten_q)
+
+
+def _dropped_or_altered_acronym(original: str, rewritten: str) -> bool:
+    """
+    Code-level backstop for the "never expand acronyms" prompt rule.
+
+    Observed failure: "What does FNOL stand for?" rewritten to "What is
+    the abbreviation for 'federal net of losses'?" — the acronym itself
+    disappears, replaced by a hallucinated (and wrong) expansion. The
+    prompt already forbids this, but this is a fast model and, per this
+    project's established pattern (see _dropped_personal_reference),
+    prompt-only guarantees aren't reliable enough for something this
+    consequential to retrieval.
+
+    Every all-caps 2-6 letter token in the original must appear
+    verbatim, unchanged, in the rewrite.
+    """
+    original_acronyms = set(_ACRONYM_RE.findall(original))
+    if not original_acronyms:
+        return False
+    rewritten_acronyms = set(_ACRONYM_RE.findall(rewritten))
+    return not original_acronyms.issubset(rewritten_acronyms)
 
 
 def _diverged_too_much(original: str, rewritten: str) -> bool:
@@ -155,23 +275,73 @@ def _diverged_too_much(original: str, rewritten: str) -> bool:
     Broader safety net, complementary to _dropped_personal_reference.
 
     Catches cases where the model replaces the question's actual
-    content with a different (but topically related) question, rather
-    than just fixing spelling/grammar or resolving a reference — e.g.
-    "who won the most recent race?" -> "who is the most successful
-    driver of all time?". Both questions are "about F1", but they ask
-    for different facts, and downstream retrieval/planning need the
-    real one.
-
-    Uses overall string similarity rather than matching specific
+    content with a different (but topically related) question. Uses
+    overall string similarity rather than matching specific
     words/phrases, since the failure isn't limited to one vocabulary
-    pattern (unlike the personal-reference case) — any part of the
-    question can get silently swapped out. This is a heuristic, not a
-    semantic check, so it's intentionally conservative (relies on the
-    fact that legitimate fixes barely touch the original text) rather
-    than trying to judge meaning.
+    pattern.
+
+    Runs unconditionally regardless of whether history is present —
+    see module docstring's 2026-07-04 bug note for why the old
+    `not history` gate let a hallucinated rewrite through during a
+    multi-turn eval session.
     """
+    from difflib import SequenceMatcher
     ratio = SequenceMatcher(None, original.lower(), rewritten.lower()).ratio()
     return ratio < _DIVERGENCE_SIMILARITY_THRESHOLD
+
+
+def _word_set(text: str) -> set[str]:
+    words = _WORD_RE.findall(text.lower())
+    return {w for w in words if w not in _STOPWORDS}
+
+
+def _overlap_ratio(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _matches_prior_turn(original: str, rewritten: str, history: list[dict]) -> tuple[bool, str]:
+    """
+    True if the rewrite resembles a PRIOR turn (user OR assistant) in
+    history more than it resembles the CURRENT question it's supposed
+    to be a rewrite of — e.g. the model regurgitated an earlier
+    question, or the previous answer, instead of engaging with the
+    current turn.
+
+    Word-overlap based (order/reordering/preamble-tolerant) rather than
+    character-sequence based, and relative rather than an absolute
+    threshold: a legitimate context-resolution rewrite can legitimately
+    share real vocabulary with recent history (that's the point of
+    resolving "what about X?" using a prior turn), so what actually
+    distinguishes a hallucination is that it resembles some PAST turn
+    MORE than it resembles the CURRENT question — a correct rewrite is
+    derived from the current question and should never lose that
+    comparison.
+
+    Returns (matched, matched_turn_content) for logging.
+    """
+    original_words = _word_set(original)
+    rewritten_words = _word_set(rewritten)
+    own_overlap = _overlap_ratio(original_words, rewritten_words)
+
+    for turn in history:
+        role = turn.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = turn.get("content", "")
+        if not content:
+            continue
+        prior_words = _word_set(content)
+        prior_overlap = _overlap_ratio(prior_words, rewritten_words)
+
+        if (
+            prior_overlap >= _PRIOR_TURN_MIN_OVERLAP
+            and prior_overlap > own_overlap + _PRIOR_TURN_OVERLAP_MARGIN
+        ):
+            return True, content
+
+    return False, ""
 
 
 class RewriterAgent(BaseAgent):
@@ -224,20 +394,37 @@ class RewriterAgent(BaseAgent):
             )
             rewritten = ""
 
-        # Only meaningful to check divergence against the raw question,
-        # not against history-resolved context — a follow-up like
-        # "what about X?" is SUPPOSED to look very different from its
-        # resolved form. history presence isn't tracked in state here,
-        # but in practice a no-history rewrite that diverges this much
-        # is virtually always a hallucinated replacement rather than
-        # legitimate resolution, since there's nothing to resolve from.
-        if rewritten and not history and _diverged_too_much(original_question, rewritten):
+        if rewritten and _dropped_quantifier(original_question, rewritten):
+            print(
+                f'[REWRITER] Rewrite dropped a numeral/quantifier present in the '
+                f'original, falling back to original question. Bad rewrite was: "{rewritten}"'
+            )
+            rewritten = ""
+
+        if rewritten and _dropped_or_altered_acronym(original_question, rewritten):
+            print(
+                f'[REWRITER] Rewrite dropped or altered an acronym present in the '
+                f'original, falling back to original question. Bad rewrite was: "{rewritten}"'
+            )
+            rewritten = ""
+
+        if rewritten and _diverged_too_much(original_question, rewritten):
             print(
                 f'[REWRITER] Rewrite diverged too far from original (similarity below '
                 f'{_DIVERGENCE_SIMILARITY_THRESHOLD}), falling back to original question. '
                 f'Bad rewrite was: "{rewritten}"'
             )
             rewritten = ""
+
+        if rewritten and history:
+            matched, matched_content = _matches_prior_turn(original_question, rewritten, history)
+            if matched:
+                print(
+                    f'[REWRITER] Rewrite resembles a PRIOR turn more than the current '
+                    f'question, falling back to original question. Bad rewrite was: '
+                    f'"{rewritten}" | Matched prior turn: "{matched_content[:100]}"'
+                )
+                rewritten = ""
 
         if rewritten and rewritten != original_question:
             print(f'[REWRITER] "{original_question}" -> "{rewritten}"')

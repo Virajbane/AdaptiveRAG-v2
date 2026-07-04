@@ -7,6 +7,25 @@ class TextChunker:
     Recursive character-based chunker.
     Works for any document type: resume, PDF, research paper, CSV, code, etc.
     No assumptions about structure — splits by paragraphs → sentences → words.
+
+    2026-07-04 fix — separator preservation:
+      _split_recursive previously used text.split(separator), which
+      discards the separator from every piece, and _merge_with_overlap
+      rejoined surviving pieces with a single " ". Net effect: chunk
+      text silently lost its own punctuation and structure on rejoin —
+      "Sentence one. Sentence two." (split on ". ") became "Sentence
+      one Sentence two." (period after "one" gone), and the same
+      applied to every "\\n\\n" paragraph break, "\\n" line break, and
+      other separator in the list except the trailing word-level " ".
+      This degrades embedding/retrieval quality corpus-wide since
+      chunk text no longer matches the source document's real
+      structure.
+
+      Fix: each split now carries its own trailing separator forward
+      (attached to whichever piece — direct or recursively-derived —
+      ends up last before that separator in the original text), and
+      merging concatenates with "" instead of " ", since separators
+      are already embedded in the pieces themselves.
     """
 
     def __init__(self, model: str = "cl100k_base"):
@@ -36,7 +55,7 @@ class TextChunker:
         text = re.sub(r'[ \t]+', ' ', text).strip()
         raw_chunks = self._split_recursive(text, self.separators)
         merged = self._merge_with_overlap(raw_chunks)
-        result = [{"text": c, "tokens": self.count_tokens(c)} for c in merged if c.strip()]
+        result = [{"text": c.strip(), "tokens": self.count_tokens(c)} for c in merged if c.strip()]
         # DEBUG
         print(f"[CHUNKER DEBUG] raw splits: {len(raw_chunks)}, merged chunks: {len(result)}")
         for i, ch in enumerate(result):
@@ -47,6 +66,11 @@ class TextChunker:
         """
         Try splitting by current separator.
         If any piece is still too large, recurse with next separator.
+
+        Each returned piece carries the separator that followed it in
+        the original text (except the very last piece, which had
+        nothing after it) — so downstream joining with "" reconstructs
+        the original punctuation/structure instead of losing it.
         """
         if not text.strip():
             return []
@@ -55,10 +79,7 @@ class TextChunker:
             # No separator left to try (text has no spaces/punctuation at
             # all — e.g. a long URL, hash, or base64 blob — and still
             # exceeds max_tokens). Split on raw token boundaries instead
-            # of falling back to individual characters: character-level
-            # splits get rejoined with " ".join() in _merge_with_overlap,
-            # which would inject a space between every character and
-            # corrupt the text (e.g. "helloworld" -> "h e l l o w o r l d").
+            # of falling back to individual characters.
             return self._hard_split_by_tokens(text)
 
         separator = separators[0]
@@ -67,15 +88,26 @@ class TextChunker:
         splits = text.split(separator)
 
         result = []
-        for split in splits:
-            split = split.strip()
-            if not split:
+        for idx, raw_split in enumerate(splits):
+            piece = raw_split.strip()
+            if not piece:
                 continue
-            if self.count_tokens(split) > self.max_tokens:
-                # Still too large — recurse with smaller separator
-                result.extend(self._split_recursive(split, remaining))
+
+            # This piece had `separator` after it in the original text,
+            # unless it's the last split from this split() call.
+            trailing = separator if idx < len(splits) - 1 else ""
+
+            if self.count_tokens(piece) > self.max_tokens:
+                # Still too large — recurse with smaller separator.
+                sub_pieces = self._split_recursive(piece, remaining)
+                if sub_pieces and trailing:
+                    # Reattach this level's separator to the last
+                    # sub-piece so the boundary isn't lost between this
+                    # recursively-split group and the next top-level split.
+                    sub_pieces[-1] = sub_pieces[-1] + trailing
+                result.extend(sub_pieces)
             else:
-                result.append(split)
+                result.append(piece + trailing)
 
         return result
 
@@ -84,7 +116,8 @@ class TextChunker:
         Absolute fallback for a single unbreakable span (no separators of
         any kind) that still exceeds max_tokens. Encodes to tokens, slices
         on token boundaries, decodes back — so pieces are correctly sized
-        without needing to be re-joined with spaces later.
+        without needing any separator reattachment (there was none to begin
+        with).
         """
         tokens = self.encoding.encode(text)
         return [
@@ -96,6 +129,10 @@ class TextChunker:
         """
         Merge small splits into chunks up to max_tokens.
         Add overlap from previous chunk for context continuity.
+
+        Splits now carry their own trailing separators (see
+        _split_recursive), so pieces are concatenated with "" rather
+        than forcibly re-inserting " " between everything.
         """
         chunks = []
         current = []
@@ -107,21 +144,21 @@ class TextChunker:
 
             if current_tokens + split_tokens > self.max_tokens:
                 if current:
-                    chunk_text = " ".join(current)
+                    chunk_text = "".join(current)
                     chunks.append(chunk_text)
                     # Build overlap buffer from end of this chunk
                     overlap_buffer = self._get_overlap_buffer(current)
 
                 # Start new chunk with overlap
                 current = overlap_buffer + [split]
-                current_tokens = self.count_tokens(" ".join(current))
+                current_tokens = self.count_tokens("".join(current))
                 overlap_buffer = []
             else:
                 current.append(split)
                 current_tokens += split_tokens
 
         if current:
-            chunks.append(" ".join(current))
+            chunks.append("".join(current))
 
         return chunks
 

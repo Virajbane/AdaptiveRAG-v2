@@ -48,7 +48,7 @@ class AnswerAgent(BaseAgent):
         # Respect the router's decision the same way tool_context already
         # does: only include doc context when 'documents' was requested.
         docs_wanted = "documents" in (state.sources_needed or [])
-        top_docs = state.retrieved_docs[:6] if docs_wanted else []
+        top_docs = state.retrieved_docs[:3] if docs_wanted else []
 
         if not top_docs and not tool_context:
             state.answer = (

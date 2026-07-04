@@ -5,6 +5,23 @@ import app.services.memory.manager as mm_module
 from app.db.mongodb.client import get_db
 from langsmith import traceable
 
+# 2026-07-04 fix: the pipeline was caching failed answers exactly like
+# successful ones. Root cause chain: an Ollama /api/generate crash inside
+# AnswerAgent set state.answer to this fallback string with
+# confidence_final=0.0 (correct) - but CriticAgent then re-scored that
+# fallback string as if it were a real answer (now fixed separately in
+# critic.py), and regardless of that, THIS file cached the result
+# unconditionally. Once cached, every future ask of the same question
+# for the same user returned the stale failure straight from Redis,
+# bypassing the graph entirely - so even after fixing planner.py and
+# critic.py, the bad answer kept coming back via [CACHE HIT].
+#
+# Fix: only cache when the pipeline actually produced a real, non-error,
+# non-fallback, non-zero-confidence answer. Caching is an optimization -
+# skipping it for a failure just means the next ask reruns the graph
+# fresh, which is exactly what we want after a transient crash.
+_FAILED_ANSWER = "Sorry, I couldn't generate an answer."
+
 
 class AgentOrchestrator:
     """
@@ -114,9 +131,27 @@ class AgentOrchestrator:
         }
 
         # -----------------------------
-        # Cache Result
+        # Cache Result — only if it's a REAL answer
         # -----------------------------
-        await query_cache.set(question, user_id, result)
+        # See module-level 2026-07-04 note above. A failed/fallback
+        # answer must never be cached, or it gets served verbatim to
+        # every future identical question for this user until the TTL
+        # expires, even after the underlying bug is fixed.
+        should_cache = (
+            not final_state.error
+            and final_state.answer
+            and final_state.answer.strip() != _FAILED_ANSWER
+            and (final_state.confidence_final or 0.0) > 0.0
+        )
+
+        if should_cache:
+            await query_cache.set(question, user_id, result)
+        else:
+            print(
+                f"[CACHE SKIP] Not caching failed/low-confidence result "
+                f"(error={final_state.error!r}, "
+                f"confidence={final_state.confidence_final})"
+            )
 
         return result
 

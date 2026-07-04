@@ -67,18 +67,83 @@ class KeywordSearchEngine:
 
 
 class KeywordSearchManager:
+    """
+    2026-07-04 fix — replace-on-reindex:
+      index_document() previously only ever called
+      self.user_chunks[user_id].extend(chunks), which meant re-ingesting
+      the SAME document (e.g. after a chunker bugfix, or a normal
+      re-upload) added a second, parallel copy of its chunks alongside
+      the old ones instead of replacing them. BM25 has no versioning
+      concept, so both copies scored and surfaced in results
+      simultaneously.
+
+      This was silently present before, but became visible once the
+      chunker's punctuation-preservation fix changed chunk text/ranking
+      enough to surface the duplicate in the observed eval's top-5.
+      Confirmed directly in eval logs: the identical chunk text appeared
+      twice in one result set under two different doc_ids - one
+      resolving to a real filename via RetrieverAgent._attach_filenames'
+      Mongo lookup, and one (the orphaned old doc_id, since superseded/
+      deleted in Mongo on re-upload) resolving to "Unknown document".
+      The filename-lookup code was working correctly; the bug was BM25
+      holding a stale doc_id that no longer had a matching Mongo record
+      at all.
+
+      Fix: index_document() now removes any existing chunks whose
+      doc_id matches one of the doc_ids being (re-)indexed before
+      extending, so re-indexing a document replaces it rather than
+      duplicating it. remove_document() is also added for explicit use
+      by a document-delete endpoint, so it can keep BM25 in sync with
+      Qdrant (QdrantVectorDB.delete_document_vectors) and Mongo instead
+      of leaving orphaned chunks behind on deletion too.
+    """
+
     def __init__(self):
         self.user_indexes = {}
         self.user_chunks = {}
 
     async def index_document(self, user_id: str, chunks: List[dict]):
+        if not chunks:
+            return
+
         if user_id not in self.user_chunks:
             self.user_chunks[user_id] = []
+
+        # Replace, don't append: drop any existing chunks for the
+        # doc_id(s) being indexed now, so re-ingesting a document
+        # (same doc_id re-processed, or a new doc_id superseding an
+        # old one for "the same" document from the user's perspective)
+        # can't leave a stale duplicate copy sitting in the index.
+        doc_ids_being_indexed = {c['doc_id'] for c in chunks}
+        self.user_chunks[user_id] = [
+            c for c in self.user_chunks[user_id]
+            if c['doc_id'] not in doc_ids_being_indexed
+        ]
         self.user_chunks[user_id].extend(chunks)
 
         if user_id not in self.user_indexes:
             self.user_indexes[user_id] = KeywordSearchEngine()
 
+        self.user_indexes[user_id].build_index(self.user_chunks[user_id])
+
+    async def remove_document(self, user_id: str, doc_id: str):
+        """
+        Remove all chunks for a specific document from this user's BM25
+        index. Call this from the document-delete endpoint alongside
+        QdrantVectorDB.delete_document_vectors(), so a deleted document
+        doesn't leave orphaned chunks behind in BM25 whose doc_id no
+        longer has a Mongo record — those chunks would keep surfacing
+        in hybrid search results and resolve to "Unknown document" once
+        their filename lookup fails, exactly like the accumulation bug
+        above.
+        """
+        if user_id not in self.user_chunks:
+            return
+
+        self.user_chunks[user_id] = [
+            c for c in self.user_chunks[user_id] if c['doc_id'] != doc_id
+        ]
+        self.user_indexes[user_id] = KeywordSearchEngine()
         self.user_indexes[user_id].build_index(self.user_chunks[user_id])
 
     async def rebuild_from_chunks(self, user_id: str, chunks: List[dict]):

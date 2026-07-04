@@ -63,7 +63,11 @@ class AgentState:
     # ── Retrieved data ───────────────────────────────────────────────────
     retrieved_docs: list[dict] = field(default_factory=list)
     web_results: list[dict] = field(default_factory=list)
-
+    retrieval_rejected: bool = False   
+    
+     # ── Metadata short-circuit ───────────────────────────────────────────
+    metadata_answer: dict = field(default_factory=dict)
+    
     # ── Tool results ─────────────────────────────────────────────────────
     tool_results: dict[str, Any] = field(default_factory=dict)
 

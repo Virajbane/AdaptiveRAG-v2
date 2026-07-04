@@ -13,7 +13,7 @@ CASES = [json.loads(l) for l in
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-async def test_no_hallucination(case):
+async def test_no_hallucination(case, judge_model):
     result = await run_single(case["question"], user_id=case["user_id"])
 
     test_case = LLMTestCase(
@@ -23,7 +23,7 @@ async def test_no_hallucination(case):
         retrieval_context=result.contexts,
     )
 
-    hallucination = HallucinationMetric(threshold=THRESHOLDS["hallucination_max"])
-    relevancy = AnswerRelevancyMetric(threshold=THRESHOLDS["answer_relevancy"])
+    hallucination = HallucinationMetric(threshold=THRESHOLDS["hallucination_max"], model=judge_model)
+    relevancy = AnswerRelevancyMetric(threshold=THRESHOLDS["answer_relevancy"], model=judge_model)
 
     assert_test(test_case, [hallucination, relevancy])

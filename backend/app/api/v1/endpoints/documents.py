@@ -7,6 +7,10 @@ from app.middleware.auth import get_current_user
 from app.db.mongodb.queries import DocumentQueries
 from app.db.mongodb.client import get_db
 from app.db.qdrant.client import QdrantVectorDB
+from app.services.retrieval.keyword_search import keyword_manager
+
+
+
 
 qdrant = QdrantVectorDB()
 
@@ -79,24 +83,22 @@ async def upload_document(
 async def process_document(doc_id: str, user_id: str, file_path: str, file_type: str, db):
     """Background task: Process uploaded document."""
     from app.services.document.processor import DocumentProcessor
+    from app.services.llm.provider import LLMProvider
 
     doc_queries = DocumentQueries(db)
 
-    # Stamp started_at the moment real work begins — this is what stale-job
-    # detection (get_stale_processing_documents) keys off of. If this
-    # background task dies before finishing (process restart/crash), the
-    # document stays at status="processing" with a started_at that quickly
-    # falls behind "now" by more than processing normally takes — making
-    # the stuck job detectable instead of indistinguishable from a job
-    # that's still legitimately in progress.
     try:
         await doc_queries.mark_processing_started(doc_id)
     except Exception as e:
         print(f"⚠️ Failed to stamp started_at for {doc_id}: {e}")
 
     try:
-        processor = DocumentProcessor(db)
+        llm = LLMProvider()  # deep-reasoning model (qwen2.5:7b) — metadata
+                             # extraction needs accurate title/author parsing,
+                             # same reasoning as AnswerAgent's model-tier fix
+        processor = DocumentProcessor(db, llm)
         result = await processor.process(file_path, file_type, user_id, doc_id)
+        ...
 
         await doc_queries.update_document_status(
             doc_id=doc_id,
@@ -174,6 +176,13 @@ async def retry_document(
     deleted on a SUCCESSFUL process_document() run — so a failed or
     crashed job's file is still on disk to reprocess from, no
     re-upload needed.
+
+    NOTE: no BM25/Qdrant cleanup needed here before reprocessing — the
+    retried job reuses the SAME doc_id, and DocumentProcessor.process()
+    -> keyword_manager.index_document() now replaces any existing
+    chunks for that doc_id rather than appending (see keyword_search.py
+    2026-07-04 fix), so this path was already safe once that fix
+    landed.
     """
     doc_queries = DocumentQueries(db)
     doc = await doc_queries.get_document(doc_id, user_id)
@@ -231,10 +240,20 @@ async def delete_document(
     db=Depends(get_db)
 ):
     """
-    Delete a document: removes the Qdrant vectors, the Mongo record, and
-    the on-disk file if it still exists (e.g. a failed job that was never
-    cleaned up — see process_document's note on why failed files are kept
-    around for /retry).
+    Delete a document: removes the Qdrant vectors, the BM25 keyword-
+    index chunks, the Mongo record, and the on-disk file if it still
+    exists (e.g. a failed job that was never cleaned up — see
+    process_document's note on why failed files are kept around for
+    /retry).
+
+    2026-07-04 fix: this previously cleaned up Qdrant and Mongo but
+    never touched KeywordSearchManager's in-memory BM25 index at all —
+    the same class of bug just fixed for re-ingestion (see
+    keyword_search.py), except unpatched on this path. A deleted
+    document's chunks stayed in BM25 indefinitely, would keep surfacing
+    in hybrid search results, and would resolve to "Unknown document"
+    once their doc_id no longer matched a Mongo record (identical
+    symptom/root cause to the re-ingestion duplication bug).
     """
     doc_queries = DocumentQueries(db)
     doc = await doc_queries.get_document(doc_id, user_id)
@@ -242,12 +261,19 @@ async def delete_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Remove Qdrant vectors first — a delete failing midway should never
-    # leave searchable vectors for a doc Mongo no longer lists.
+    # Remove Qdrant vectors and BM25 chunks first — a delete failing
+    # midway should never leave searchable content for a doc Mongo no
+    # longer lists. Each wrapped independently so one failing doesn't
+    # skip the other.
     try:
         await qdrant.delete_document_vectors(doc_id=doc_id, user_id=user_id)
     except Exception as e:
         print(f"⚠️ Failed to delete Qdrant vectors for {doc_id}: {e}")
+
+    try:
+        await keyword_manager.remove_document(user_id=user_id, doc_id=doc_id)
+    except Exception as e:
+        print(f"⚠️ Failed to remove BM25 chunks for {doc_id}: {e}")
 
     storage_path = doc.get("storage_path")
     if storage_path and os.path.exists(storage_path):
