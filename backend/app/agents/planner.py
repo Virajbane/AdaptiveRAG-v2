@@ -205,7 +205,7 @@ class PlannerAgent(BaseAgent):
         question_for_routing = state.rewritten_question or state.question
         routing_signal_text = f"{original_question} {question_for_routing}"
 
-        # ---- Metadata short-circuit: skip retrieval entirely ----
+        # # ---- Metadata short-circuit: skip retrieval entirely ----
         # Title/author questions have near-zero lexical/semantic overlap
         # with the metadata text itself (the title never contains the
         # word "title") — no amount of embedding tuning reliably surfaces
@@ -213,7 +213,30 @@ class PlannerAgent(BaseAgent):
         # extracted at ingestion and is available, answer from it
         # directly instead of routing through retriever/grader/answer/
         # critic at all.
-        if _METADATA_Q.search(routing_signal_text):
+        #
+        # 2026-07-05 fix: this previously checked routing_signal_text
+        # (original + rewritten question combined), following the same
+        # pattern as _DOC_REF/_PERSONAL_REF below. That pattern exists to
+        # guard against the REWRITER REMOVING signal the original question
+        # had. But here it caused the opposite failure: the rewriter
+        # PARAPHRASED IN a spurious match that was never in the user's
+        # real question. On "What future work directions does the paper
+        # propose..." the rewriter produced "How do the AUTHORS propose
+        # to enhance...", and \bauthor\b matched that, firing the
+        # metadata short-circuit and answering a future-work question
+        # with the paper's title/author list at 95% confidence — a
+        # confidently wrong answer that bypassed retrieval/grader/critic
+        # entirely, so none of the normal safety nets got a chance to
+        # catch it.
+        #
+        # Metadata questions ("what is the title", "who are the authors")
+        # are asked in deliberate, literal phrasing that a rewriter is
+        # unlikely to accidentally strip out — unlike "the paper", which
+        # legitimately gets paraphrased into synonyms often. So this
+        # check uses ONLY the original question; the rewritten-question
+        # safety net that the other overrides below still use is not
+        # appropriate here.
+        if _METADATA_Q.search(original_question):
             doc_metadata = await self._get_document_metadata(state)
             if doc_metadata:
                 print(f"[PLANNER] Metadata question detected, using stored "

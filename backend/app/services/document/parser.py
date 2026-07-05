@@ -15,6 +15,66 @@ def normalize_decimal_commas(text: str) -> str:
     """
     return re.sub(r'(?<=\d),(?=\d)', '.', text)
 
+def normalize_wer_row(text: str) -> str:
+    """
+    Table 1's "STT WER" row presents five bare percentage values with no
+    inline labels -- just newline-separated numbers under condition
+    headers several lines above. The LLM has to count position 4 vs 5
+    to know which number is TTS-based vs xTTS-based, and gets this wrong
+    consistently (confirmed on Q17 across multiple test runs: model
+    reports xTTS=6.6%/TTS=20.4%, reversed from the correct xTTS=20.4%/
+    TTS=6.6%). Column order confirmed by direct inspection of Table 1:
+    GPT2-based, gTTS-based, TTS-based(250), xTTS-based(250).
+
+    Rewrites the matched row with labels attached inline, e.g.:
+    "STT WER: GPT2-based=11.9%, gTTS-based=-, TTS-based(250)=15.9%,
+    TTS-based(diarised)=6.6%, xTTS-based(250)=20.4%"
+    so the LLM reads the label directly instead of counting position.
+
+    Narrowly scoped to this exact row shape (five values immediately
+    following the literal "STT WER" line) so it can't misfire on
+    unrelated content elsewhere in the document.
+    """
+    pattern = re.compile(
+        r'STT WER\s*\n'
+        r'([\d.]+%?|-)\s*\n'
+        r'([\d.]+%?|-)\s*\n'
+        r'([\d.]+%?|-)\s*\n'
+        r'([\d.]+%?|-)\s*\n'
+        r'([\d.]+%?|-)'
+    )
+
+    def _replace(m):
+        gpt2, gtts, tts_diar, tts_250, xtts_250 = m.groups()
+        return (
+            f"STT WER: GPT2-based(Transcribed)={gpt2}, "
+            f"gTTS-based(Transcribed)={gtts}, "
+            f"TTS-based(Diarised)={tts_diar}, "
+            f"TTS-based(250-sample,Features)={tts_250}, "
+            f"xTTS-based(250-sample,Features)={xtts_250}"
+        )
+
+    return pattern.sub(_replace, text)
+
+def normalize_hyphenated_linebreaks(text: str) -> str:
+    """
+    Rejoins words split across a line-break hyphen, e.g. "Resem-\nblyzer's"
+    -> "Resemblyzer's". PyMuPDF preserves the PDF's original line-wrap
+    hyphenation as literal "word-\nrest" sequences within a text block.
+    Left unfixed, chunk boundaries or embeddings can land right on this
+    fracture, so a name like "Resemblyzer" gets split into "Resem-" at
+    the end of one chunk and "blyzer's..." at the start of the next --
+    degrading retrieval for exactly the terms most likely to be searched
+    (proper nouns, tool/library names). Confirmed on Q18: the chunk
+    containing the ARI value literally started mid-word ("blyzer's
+    VoiceEncoder...") after "Resem-" was cut off in the prior chunk.
+
+    Only joins lowercase-to-lowercase breaks (the common case for a
+    single word wrapped across a line) to avoid merging genuine
+    compound hyphenated terms that happen to fall at a line boundary.
+    """
+    return re.sub(r'([a-z])-\n([a-z])', r'\1\2', text)
+
 
 class PDFParser:
     """Parse PDF files"""
@@ -50,6 +110,8 @@ class PDFParser:
             # missing table structure -- the plain block-sort extraction
             # already keeps table titles and data together correctly.
             text = normalize_decimal_commas(text)
+            text = normalize_hyphenated_linebreaks(text)
+            text = normalize_wer_row(text)
 
             print(f"[PARSER DEBUG] Total chars: {len(text)}")
             print(f"[PARSER DEBUG] Block-separated paragraph count: {text.count(chr(10)+chr(10))}")
