@@ -48,3 +48,4 @@ email-validator==2.3.0
 langgraph==1.2.5
 
 
+groq

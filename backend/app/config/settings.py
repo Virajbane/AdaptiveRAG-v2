@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen2.5:7b"
     OLLAMA_FAST_MODEL: str = "qwen2.5:0.5b"   
     EMBEDDING_MODEL: str = "nomic-embed-text"
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None

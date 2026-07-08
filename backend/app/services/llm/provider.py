@@ -35,24 +35,30 @@ DEFAULT_NUM_CTX = 2048
 
 class LLMProvider:
     """
-    LLM provider wrapper - handles Ollama/OpenAI/Gemini
+    LLM provider wrapper - handles Ollama (local dev) / Groq (production)
+
+    2026-07-08: added Groq as a hosted-inference path for production
+    deployment (Render free tier has no GPU and not enough RAM for
+    qwen2.5:7b). Selection is automatic: if settings.GROQ_API_KEY is
+    set, Groq is used; otherwise falls back to local Ollama. This means
+    local dev (.env with no GROQ_API_KEY) is untouched, and production
+    (Render env vars with GROQ_API_KEY set) automatically switches over
+    with no code change needed per environment.
     """
 
     def __init__(self, model: str = None, num_ctx: int = DEFAULT_NUM_CTX):
-        self.model = model or settings.OLLAMA_MODEL
-        self.base_url = settings.OLLAMA_BASE_URL
+        self.use_groq = bool(settings.GROQ_API_KEY)
         self.num_ctx = num_ctx
+
+        if self.use_groq:
+            self.model = model or settings.GROQ_MODEL
+        else:
+            self.model = model or settings.OLLAMA_MODEL
+            self.base_url = settings.OLLAMA_BASE_URL
 
     async def generate(self, prompt: str, max_tokens: int = 2000) -> str:
         """
-        Generate text using Ollama (local)
-
-        Args:
-            prompt: Input prompt
-            max_tokens: Max tokens to generate
-
-        Returns:
-            Generated text
+        Generate text using Groq (production) or Ollama (local dev)
 
         Raises:
             Exception: propagates the real underlying error (e.g. model
@@ -62,6 +68,22 @@ class LLMProvider:
             that disguises real failures as model output and breaks
             downstream JSON parsing with a misleading error.
         """
+        if self.use_groq:
+            return await self._generate_groq(prompt, max_tokens)
+        return await self._generate_ollama(prompt, max_tokens)
+
+    async def _generate_groq(self, prompt: str, max_tokens: int) -> str:
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content or ""
+
+    async def _generate_ollama(self, prompt: str, max_tokens: int) -> str:
         from ollama import AsyncClient
 
         client = AsyncClient(host=self.base_url)

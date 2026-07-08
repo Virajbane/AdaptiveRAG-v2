@@ -2,6 +2,7 @@
 
 Operational guides for common changes to the RAG 2.0 system. Each runbook assumes you're working from the project root with the dev stack (`docker-compose.yml`) running.
 
+docker exec -it rag-redis redis-cli FLUSHDB
 ---
 
 ## Runbook 1: Adding a new LLM provider
