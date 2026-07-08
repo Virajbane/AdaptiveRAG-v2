@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     TAVILY_API_KEY: str = ""
+    VOYAGE_API_KEY: Optional[str] = None
 
     # ==================== SECURITY ====================
     SECRET_KEY: str  # Required from .env

@@ -23,7 +23,7 @@ pydantic-settings
 
 aiohttp
 tenacity
-
+voyageai
 pyjwt
 bcrypt
 
