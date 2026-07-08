@@ -1,0 +1,72 @@
+[
+  {
+    "user_input":"What are my skills mentioned in the docs?",
+    "retrieved_contexts":[
+      ""
+    ],
+    "reference_contexts":[
+
+    ],
+    "response":"The skills mentioned in the given sources for Qwen are as follows:\n1. Text-to-speech tools lack ability to answer questions about content, summarize complex material, or engage in interactive study sessions.\n2. The Retrieval-Augmented Generation (RAG) system integrated into Eyes.AI enables visually impaired students to upload their study materials and ask natural language questions that reference specific sections of the documents.\n3. Most existing assistive technologies are primarily designed for English-speaking users in Western countries.\n4. The survey covers solutions spanning mobile accessibility, computer vision for the blind, voice-controlled assistants, autonomous AI agents, and intelligent document processing.\n5. To create a shopping assistant module that integrates barcode scanning, AI-powered product image analysis with market survey generation, receipt OCR to help visually impaired users independently identify products, compare prices, and verify purchase receipts.\n6. To implement a Retrieval-Augmented Generation (RAG) based document study system that allows users to upload PDF, DOCX, and TXT documents, ask natural language questions in natural language, receive accurate spoken answers with source attribution, enabling visually impaired students to study independently.\n\nSources:\n[Source 1] [8]\n[6][7].",
+    "reference":"Languages: Python, SQL, JavaScript, Java. AI\/ML: Machine Learning, Deep Learning, LLMs, RAG, NLP, Transformers, Fine-tuning, Prompt Engineering. Frameworks & Libraries: PyTorch, Scikit-learn, Pandas, NumPy, FastAPI, LangChain, LangGraph, Matplotlib. Web\/Full-Stack: React.js, Next.js, Node.js, Tailwind CSS. Databases: MongoDB, MySQL, Supabase. Tools & Platforms: Git, GitHub, Vercel, Netlify, Hugging Face, Ollama, n8n.",
+    "faithfulness":null,
+    "answer_relevancy":0.5215254304,
+    "answer_correctness":0.9515687614
+  },
+  {
+    "user_input":"Summarize my resume",
+    "retrieved_contexts":[
+      ""
+    ],
+    "reference_contexts":[
+
+    ],
+    "response":"[Source 1] declares that this written submission represents my ideas in my own words and where other\u2019s ideas or words included; I have adequately cited and referenced the original sources.\n[Source 2] provides a comparative analysis with existing solutions to highlight the differences and similarities between the proposed solution and alternative approaches.\n[Source 3] mentions the specific features of the application, its capabilities, and how it addresses visual impairments.\n[Source 4] discusses the hardware requirements, software components, and limitations associated with the project.\n[Source 5] describes the system architecture and technical specifications in detail.",
+    "reference":"Viraj Bane is an AI\/ML Engineer with a B.E. in Computer Science (AI & ML) from VIT Mumbai (CGPA 8.1, 2023-2026), skilled in Python, ML, Deep Learning, LLMs, and RAG. He built Adaptive-RAG, a 6-agent multi-agent RAG platform with hybrid retrieval and Redis caching; an AI DB Agent for natural language database queries across 5 database systems; and EDU.AI, an AI-powered classroom platform built at the Guinness World Record-recognized Mumbai Hack 2024. He has published 2 fine-tuned NLP models on Hugging Face, a research paper at NCRENB 2026, and holds an NPTEL Deep Learning Elite certification from IIT Ropar.",
+    "faithfulness":1.0,
+    "answer_relevancy":0.5060636389,
+    "answer_correctness":0.9326001434
+  },
+  {
+    "user_input":"What's the latest news about AI regulation?",
+    "retrieved_contexts":[
+      ""
+    ],
+    "reference_contexts":[
+
+    ],
+    "response":"The latest news about AI regulation is that modern AI models can now identify objects in real time, understand the context of a scene, generate natural language descriptions of visual content, and even execute complex multi-step tasks autonomously. The widespread availability of powerful smartphones equipped with high-resolution cameras, multi-core processors, and dedicated AI accelerators provides an ideal platform for deploying these technologies directly into the hands of users who need them most.",
+    "reference":"",
+    "faithfulness":0.5,
+    "answer_relevancy":0.0,
+    "answer_correctness":0.1748402508
+  },
+  {
+    "user_input":"Who won the most recent Formula 1 race?",
+    "retrieved_contexts":[
+      ""
+    ],
+    "reference_contexts":[
+
+    ],
+    "response":"According to the information provided, the latest Formula 1 race was won by Lewis Hamilton of Mercedes-Benz for Mercedes. The source that directly states this is:\n\n[Source 1]\nThe statement in question directly mentions Lewis Hamilton as the winner of the most recent Formula 1 race.",
+    "reference":"",
+    "faithfulness":0.5,
+    "answer_relevancy":0.7557586007,
+    "answer_correctness":0.1718487809
+  },
+  {
+    "user_input":"What overall task completion rate did my AI agent achieve according to my uploaded report, and how does that compare to typical AI agent automation benchmarks?",
+    "retrieved_contexts":[
+      ""
+    ],
+    "reference_contexts":[
+
+    ],
+    "response":"According to the sources provided, the AI agent achieved an overall task completion rate of 100%. This is based on the results and comparisons mentioned in Chapters 4, 5, and 3 of the given text. The comparison with typical AI agent automation benchmarks highlights the ability of Eyes.AI's approach to handle a wide range of tasks effectively, especially those involving environmental perception, voice command processing, shopping assistant performance, and more complex tasks related to government forms.\nTo provide a more detailed response, it would be helpful if you could specify any areas or particular aspects of the AI agent automation benchmarks that you're interested in discussing.",
+    "reference":"According to the report, the Eyes.AI autonomous agent achieved an overall task completion rate of 87% (26 out of 30 test tasks), with 100% success on simple single-app tasks (1-3 steps), 90% on medium-complexity tasks (4-8 steps), and 70% on complex multi-app tasks (8+ steps), averaging 9.7 steps per task. This is generally in line with or above typical AI agent automation benchmarks, which commonly report success rates in the 60-85% range for complex multi-step tasks, with performance dropping notably as task complexity and step count increase.",
+    "faithfulness":1.0,
+    "answer_relevancy":0.794862906,
+    "answer_correctness":0.9849335432
+  }
+]

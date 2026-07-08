@@ -1,0 +1,5 @@
+{"id": "routing_001_docs_explicit", "question": "What are my skills mentioned in the docs?", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["documents"]}
+{"id": "routing_002_docs_implicit", "question": "Summarize my resume", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["documents"]}
+{"id": "routing_003_web_explicit", "question": "What's the latest news about AI regulation?", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["web"]}
+{"id": "routing_004_web_implicit", "question": "Who won the most recent Formula 1 race?", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["web"]}
+{"id": "routing_005_both", "question": "Compare what my uploaded report says about revenue to the latest industry figures online", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["documents", "web"]}

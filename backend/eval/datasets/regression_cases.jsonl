@@ -1,0 +1,1 @@
+{"id": "routing_001_docs_explicit", "bug_ref": "2026-06-30-routing-bug", "question": "What are my skills mentioned in the docs?", "user_id": "6a357f230aba188bbc0d5549", "expected_sources": ["documents"], "must_not_contain": ["I don't have documents"]}
