@@ -1,3 +1,4 @@
+from app.config.settings import settings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from qdrant_client.http.exceptions import UnexpectedResponse, ResponseHandlingException
@@ -7,8 +8,11 @@ import uuid
 class QdrantVectorDB:
     """Qdrant vector database client"""
 
-    def __init__(self, url: str = "http://localhost:6333"):
-        self.client = QdrantClient(url=url)
+    def __init__(self, url: str = None, api_key: str = None):
+        self.client = QdrantClient(
+            url=url or settings.QDRANT_URL,
+            api_key=api_key or settings.QDRANT_API_KEY
+        )
         self.collection_name = "documents_embeddings"
         self._ensure_collection()
 

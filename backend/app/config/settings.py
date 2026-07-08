@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     MONGODB_URL: str  # Required from .env
     QDRANT_URL: str = "http://localhost:6333"
     REDIS_URL: str = "redis://localhost:6379/0"
+    QDRANT_API_KEY: Optional[str] = None
 
 
     # ==================== LANGSMITH ====================
