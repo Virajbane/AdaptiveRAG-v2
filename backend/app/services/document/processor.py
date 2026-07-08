@@ -4,6 +4,7 @@ from app.services.document.embedder import EmbeddingGenerator
 from app.services.document.metadata_extractor import MetadataExtractor
 from app.db.qdrant.client import QdrantVectorDB
 from bson import ObjectId
+from app.config.settings import settings
 class DocumentProcessor:
     """Orchestrate document processing pipeline"""
 
@@ -11,7 +12,7 @@ class DocumentProcessor:
         self.db = db
         self.parser = DocumentParser()
         self.chunker = TextChunker()
-        self.embedder = EmbeddingGenerator()
+        self.embedder = EmbeddingGenerator(ollama_url=settings.OLLAMA_BASE_URL)
         self.vector_db = QdrantVectorDB()
         self.metadata_extractor = MetadataExtractor(llm)  # pass main llm, not fast_llm
 

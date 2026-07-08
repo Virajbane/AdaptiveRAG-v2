@@ -1,4 +1,5 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+from app.config.settings import settings
 
 client: AsyncIOMotorClient = None
 db = None
@@ -6,9 +7,7 @@ db = None
 async def connect_to_mongo():
     global client, db
 
-    client = AsyncIOMotorClient(
-        "mongodb://admin:password123@localhost:27017/rag_db?authSource=admin"
-    )
+    client = AsyncIOMotorClient(settings.MONGODB_URL)
 
     db = client["rag_db"]
 
