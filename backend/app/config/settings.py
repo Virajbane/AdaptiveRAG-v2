@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "nomic-embed-text"
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    ENABLE_RERANKER: bool = True
 
     # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None

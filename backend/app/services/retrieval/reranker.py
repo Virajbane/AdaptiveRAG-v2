@@ -1,5 +1,6 @@
 from sentence_transformers import CrossEncoder
 from typing import List
+from app.config.settings import settings
 
 class BGEReranker:
     """BGE Cross-Encoder for result reranking"""
@@ -8,7 +9,21 @@ class BGEReranker:
         """
         Initialize reranker
         Note: First load will download model (~500MB)
+
+        2026-07-08: skip loading entirely when settings.ENABLE_RERANKER
+        is False. Added because the ~500MB model load pushes memory
+        usage past Render free tier's 512MB cap, crashing the whole
+        process with an OOM kill right after startup - not a caught
+        exception, so the existing try/except never even got a chance
+        to run. Setting ENABLE_RERANKER=false in that environment skips
+        the load attempt entirely; hybrid search (BM25 + vector + RRF)
+        still runs normally without the reranking pass.
         """
+        if not settings.ENABLE_RERANKER:
+            print("Reranker disabled via ENABLE_RERANKER=false — skipping model load.")
+            self.available = False
+            return
+
         try:
             self.model = CrossEncoder(model_name)
             self.available = True
