@@ -1,4 +1,3 @@
-from sentence_transformers import CrossEncoder
 from typing import List
 from app.config.settings import settings
 
@@ -25,6 +24,7 @@ class BGEReranker:
             return
 
         try:
+            from sentence_transformers import CrossEncoder
             self.model = CrossEncoder(model_name)
             self.available = True
         except Exception as e:
