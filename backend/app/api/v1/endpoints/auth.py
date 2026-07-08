@@ -6,6 +6,7 @@ from app.utils.validators import InputValidator
 from datetime import datetime
 from bson import ObjectId
 import bcrypt
+import asyncio
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,10 +57,9 @@ async def register(request: RegisterRequest):
             )
 
         # 4. HASH PASSWORD
-        hashed_password = bcrypt.hashpw(
-            password.encode("utf-8"),
-            bcrypt.gensalt(rounds=12)
-        ).decode("utf-8")
+        hashed_password = await asyncio.to_thread(
+            lambda: bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+        )
 
         # 5. CREATE USER DOCUMENT
         user_data = {
@@ -120,10 +120,12 @@ async def login(request: LoginRequest):
             )
 
         # 4. VERIFY PASSWORD
-        if not bcrypt.checkpw(
+        is_valid = await asyncio.to_thread(
+            bcrypt.checkpw,
             request.password.encode("utf-8"),
             user["password_hash"].encode("utf-8")
-        ):
+        )
+        if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
