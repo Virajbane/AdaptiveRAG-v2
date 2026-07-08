@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import KineticNetwork from '@/components/KineticNetwork';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -81,7 +83,7 @@ export default function RegisterPage() {
 
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/auth/register',
+        `${API_URL}/api/v1/auth/register`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

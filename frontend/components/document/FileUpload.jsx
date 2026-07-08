@@ -4,6 +4,8 @@
 import { useState } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // This component shows a drag-and-drop box for uploading files.
 // It calls onUploadSuccess() when the upload finishes, so the parent
 // page knows to refresh its document list.
@@ -38,7 +40,7 @@ export function FileUpload({ onUploadSuccess }) {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/api/v1/documents/upload', {
+      const response = await fetch(`${API_URL}/api/v1/documents/upload`, {
         method: 'POST',
         headers: {
           // Note: we do NOT set Content-Type here.

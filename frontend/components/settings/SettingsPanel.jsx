@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 /**
  * Settings as a slide-over, opened from the avatar dropdown in DashboardLayout —
  * not a sidebar nav item. Matches the convention that account settings are
@@ -26,7 +28,7 @@ export function SettingsPanel({ open, onClose }) {
     const loadUserProfile = async () => {
       setLoading(true);
       try {
-        const res = await fetch('http://localhost:8000/api/v1/auth/me', {
+        const res = await fetch(`${API_URL}/api/v1/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('Failed to load profile');

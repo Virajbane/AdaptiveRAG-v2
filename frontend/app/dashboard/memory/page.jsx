@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export default function MemoryPage() {
   const { token } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -16,7 +18,7 @@ export default function MemoryPage() {
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_URL}/api/v1/auth/register`, {
+      const res = await fetch(`${API_URL}/api/v1/memory/load`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -52,7 +54,7 @@ export default function MemoryPage() {
 
     try {
       const res = await fetch(
-        `${API_URL}/api/v1/auth/register`,
+        `${API_URL}/api/v1/memory/session/${sessionId}`,
         {
           method: 'DELETE',
           headers: {

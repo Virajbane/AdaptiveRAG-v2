@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export function SearchBox({ onResults }) {
   const { token } = useAuth();
   const [query, setQuery] = useState('');
@@ -17,7 +19,7 @@ export function SearchBox({ onResults }) {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/retrieval/search', {
+      const response = await fetch(`${API_URL}/api/v1/retrieval/search`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
