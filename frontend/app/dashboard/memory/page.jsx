@@ -16,7 +16,7 @@ export default function MemoryPage() {
     try {
       setLoading(true);
 
-      const res = await fetch('http://localhost:8000/api/v1/memory/load', {
+      const res = await fetch(`${API_URL}/api/v1/auth/register`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -52,7 +52,7 @@ export default function MemoryPage() {
 
     try {
       const res = await fetch(
-        `http://localhost:8000/api/v1/memory/session/${sessionId}`,
+        `${API_URL}/api/v1/auth/register`,
         {
           method: 'DELETE',
           headers: {
