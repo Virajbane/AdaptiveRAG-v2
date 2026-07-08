@@ -12,7 +12,7 @@ Most RAG demos are a single retrieval step bolted onto an LLM call. This project
 
 ---
 
-## Architecture
+## Architectures
 
 ```
                          ┌─────────────────────┐
