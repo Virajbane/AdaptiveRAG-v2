@@ -291,7 +291,20 @@ def build_agent_graph(db=None):
 
 
     def route_after_planning(state: AgentState) -> str:
-        if state.sources_needed == ["metadata"]:
+        # NOTE: checks membership, not exact-list equality. The grader's
+        # high-confidence retrieval override (below) can append "documents"
+        # to sources_needed even on metadata questions, since retriever runs
+        # in parallel with planner and often returns SOME chunk scoring
+        # above HIGH_CONFIDENCE_RETRIEVAL_THRESHOLD (e.g. a References-section
+        # chunk on an authors question) regardless of what the planner asked
+        # for. An exact-list check (`== ["metadata"]`) silently loses this
+        # route the moment that override fires, sending the question through
+        # the generic document-answer path instead — even though the correct,
+        # directly-extracted metadata answer is sitting in state.metadata_answer.
+        # Metadata wins whenever present: it's not an inference from retrieved
+        # chunks, so a coincidental document-score override should never be
+        # allowed to preempt it.
+        if "metadata" in state.sources_needed and state.metadata_answer:
             print("[ROUTER] Metadata answer available → metadata_answer (skipping retrieval path)")
             return "metadata_answer"
 

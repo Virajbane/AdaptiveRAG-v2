@@ -15,7 +15,9 @@ langchain
 langchain-core
 langchain-community
 langgraph
-langsmith
+langsmith 
+
+docling
 
 python-dotenv
 pydantic

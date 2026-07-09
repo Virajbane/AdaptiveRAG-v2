@@ -6,7 +6,7 @@ run fast and need no mocking.
 """
 
 import pytest
-from app.services.document.chunker import TextChunker
+from backend.app.services.document.chunker import TextChunker
 
 
 @pytest.fixture

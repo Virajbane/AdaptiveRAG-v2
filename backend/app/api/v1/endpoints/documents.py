@@ -82,7 +82,7 @@ async def upload_document(
 
 async def process_document(doc_id: str, user_id: str, file_path: str, file_type: str, db):
     """Background task: Process uploaded document."""
-    from app.services.document.processor import DocumentProcessor
+    from app.services.document.document_processor import DocumentProcessor
     from app.services.llm.provider import LLMProvider
 
     doc_queries = DocumentQueries(db)

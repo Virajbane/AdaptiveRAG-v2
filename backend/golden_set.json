@@ -1,0 +1,43 @@
+[
+  {
+    "id": "retrieval_table_data_1",
+    "question": "What accuracy did Lychee-FD achieve on TriviaQA in the speech-to-speech (S->S) setting?",
+    "type": "retrieval",
+    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
+    "expected_answer_contains": ["39.4"],
+    "document_id": null,
+    "note": "Table 1 data row -- known weak point (BM25-only test showed this NOT FOUND@6 due to table/header fragmentation)."
+  },
+  {
+    "id": "retrieval_prose_dataset_1",
+    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
+    "type": "retrieval",
+    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
+    "expected_answer_contains": ["140K", "140,000"],
+    "document_id": null
+  },
+  {
+    "id": "retrieval_prose_gpu_1",
+    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
+    "type": "retrieval",
+    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
+    "expected_answer_contains": ["8", "H20"],
+    "document_id": null
+  },
+  {
+    "id": "answer_utmos_score_1",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": ["4.50"],
+    "document_id": "6a4f8d62a26380c30df30ba6",
+    "note": "Value sits inside a figure's plotted data points, heavily fragmented by PDF text extraction."
+  },
+  {
+    "id": "answer_metadata_authors_1",
+    "question": "Who are the authors of this paper?",
+    "type": "answer",
+    "expected_answer_contains": ["Zhenyu Liu", "Yunxin Li", "Baotian Hu"],
+    "document_id": "6a4f8d62a26380c30df30ba6",
+    "note": "Tests MetadataExtractor, separate from chunk retrieval entirely."
+  }
+]
