@@ -1,5 +1,7 @@
+# PATH: backend/app/config/settings.py
 from pydantic_settings import BaseSettings
 from typing import Optional
+
 
 class Settings(BaseSettings):
     # ==================== APP ====================
@@ -12,7 +14,6 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     QDRANT_API_KEY: Optional[str] = None
 
-
     # ==================== LANGSMITH ====================
     LANGCHAIN_TRACING_V2: bool = False
     LANGCHAIN_API_KEY: Optional[str] = None
@@ -22,9 +23,8 @@ class Settings(BaseSettings):
     # ==================== LLM ====================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"
-    OLLAMA_FAST_MODEL: str = "qwen2.5:0.5b"   
+    OLLAMA_FAST_MODEL: str = "qwen2.5:0.5b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
-    GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     ENABLE_RERANKER: bool = True
 
@@ -35,11 +35,14 @@ class Settings(BaseSettings):
     VOYAGE_API_KEY: Optional[str] = None
 
     # ==================== SECURITY ====================
+    # NOTE: standardized on SECRET_KEY everywhere (app code, .env, .env.example,
+    # docker-compose.yml, docker-compose.prod.yml). Previously some compose
+    # files set JWT_SECRET_KEY instead, which pydantic-settings does NOT map
+    # onto SECRET_KEY -- that caused a required-field crash on container boot.
     SECRET_KEY: str  # Required from .env
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
-    
-    # NEW PHASE 10 SECURITY FIELDS
+
     ENCRYPTION_KEY: str = "default-change-in-production"
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
@@ -56,5 +59,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "allow"  # Allow extra fields from .env
+
 
 settings = Settings()

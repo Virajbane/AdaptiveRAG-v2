@@ -6,6 +6,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb.client import connect_to_mongo, close_mongo_connection, get_db
+from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
 from app.services.memory.redis_client import redis_client
 from app.services.memory.long_term import LongTermMemory
 from app.services.memory.manager import MemoryManager
@@ -79,7 +80,7 @@ async def startup():
         print("❌ db is still None after get_db()!")
 
     # Rebuild BM25 keyword indexes from Qdrant on every startup
-    await _rebuild_bm25_indexes()
+    await rebuild_bm25_indexes()
 
 
 async def _rebuild_bm25_indexes():

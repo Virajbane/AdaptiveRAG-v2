@@ -186,6 +186,49 @@ class CriticAgent(BaseAgent):
             state.critic_confidence = max(state.critic_confidence, 0.75)
             state.validation_issues = []
 
+            # 2026-07-10 fix — unexplained high-confidence ACCEPTANCE despite
+            # near-zero grounding:
+            #   Mirror image of the override above. That fix protects against
+            #   the judge saying "invalid" when the answer is actually fine.
+            #   This protects the opposite and more dangerous direction: the
+            #   judge saying "valid, high confidence" while the deterministic
+            #   grounding check finds essentially no overlap between the
+            #   answer's claims and the retrieved context -- i.e. a likely
+            #   hallucination that the judge rubber-stamped.
+            #
+            #   Caught directly in eval: golden-set question about a benchmark
+            #   never mentioned in the source document (SQuAD) still produced
+            #   a confident-sounding accuracy figure. CriticAgent's own
+            #   grounding_score computed 0.00 (zero of the answer's checkable
+            #   facts appeared anywhere in retrieved context), yet the judge
+            #   returned valid=True, confidence=1.00, and confidence_final
+            #   still landed at 0.99 -- the highest-confidence answer in that
+            #   entire eval run, despite being the one most likely fabricated.
+            #   No existing check catches this: unexplained_rejection only
+            #   fires on invalid+0-confidence+no-issues, which is the opposite
+            #   pattern.
+            overconfident_acceptance = (
+                state.is_valid
+                and state.critic_confidence >= 0.8
+                and grounding_score < 0.2
+            )
+
+            if overconfident_acceptance:
+                print(
+                    f"[CRITIC] Overriding high-confidence acceptance despite "
+                    f"near-zero grounding (grounding_score={grounding_score:.2f}, "
+                    f"critic_confidence={state.critic_confidence:.2f}) "
+                    f"— judge likely rubber-stamped a hallucination"
+                )
+                state.is_valid = False
+                state.critic_confidence = min(state.critic_confidence, 0.2)
+                state.validation_issues = state.validation_issues + [
+                    f"Deterministic grounding check found near-zero overlap "
+                    f"(score={grounding_score:.2f}) between answer claims and "
+                    f"retrieved context, despite judge approval — treating as "
+                    f"likely hallucination"
+                ]
+
         top_doc_score = None
         if state.retrieved_docs:
             top_doc_score = state.retrieved_docs[0].get("rerank_score", 0.5)

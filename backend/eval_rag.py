@@ -14,16 +14,16 @@ RETRIEVAL EVAL (ready to run now):
     What matters is whether the right information came back, not which
     numbered slot it landed in.
 
-ANSWER EVAL (needs one more piece from you):
-    AnswerAgent operates on a shared AgentState populated by upstream
-    agents (Rewriter -> Planner -> Retriever -> Grader -> ToolAgent ->
-    Critic -> Answer), not a plain question string. This script can't
-    guess that orchestration correctly, so it calls a single
-    `run_pipeline_fn(question, user_id)` callable that YOU wire up below
-    to however your API route actually invokes the full agent graph.
-    Until PIPELINE_ENTRYPOINT is set, answer-type questions are skipped
-    with a clear message rather than silently failing on a wrong
-    assumption about AnswerAgent's interface.
+ANSWER EVAL:
+    Runs the full pipeline via PIPELINE_ENTRYPOINT and scores each answer
+    on THREE independent axes:
+      - keyword hits          (cheap, can look like a pass while wrong)
+      - faithfulness          (is the answer grounded in retrieved context?)
+      - relevance             (does the answer actually address the question?)
+    Faithfulness and relevance are deliberately separate judges: a faithful
+    answer can still dodge the question, and a relevant-sounding answer can
+    still be fabricated. Reporting all three avoids the failure mode where
+    a keyword match hides a real hallucination (see UTMOS eval history).
 
 Run:
     python eval_rag.py --golden golden_set.json --user-id <test_user_id>
@@ -35,7 +35,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable, Awaitable
-
+import re
 
 @dataclass
 class RetrievalResult:
@@ -53,6 +53,7 @@ class AnswerResult:
     keyword_hits: int
     keyword_total: int
     faithfulness_score: Optional[float]
+    relevance_score: Optional[float]
     unsupported_claims: List[str] = field(default_factory=list)
 
 
@@ -111,6 +112,22 @@ Instructions:
 """
 
 
+RELEVANCE_JUDGE_PROMPT = """You are grading whether an AI-generated answer actually addresses the question asked.
+
+Question: {question}
+Answer to grade: {answer}
+
+Instructions:
+- Score 1.0 if the answer directly and completely addresses the question
+- Score 0.5 if the answer is on-topic but partial, vague, or sidesteps part of the question
+- Score 0.0 if the answer doesn't address the question at all
+- A clear, honest "this isn't in the document" response to a question whose answer
+  genuinely isn't in the source counts as fully relevant (1.0) -- declining
+  correctly is a correct answer, not a dodge.
+- Output ONLY the number (1.0, 0.5, or 0.0), nothing else.
+"""
+
+
 async def judge_faithfulness(llm, context: str, answer: str) -> tuple:
     """Uses your own LLMProvider.generate() as judge -- confirmed interface
     match, no guessing needed here."""
@@ -118,7 +135,7 @@ async def judge_faithfulness(llm, context: str, answer: str) -> tuple:
     try:
         judge_response = await llm.generate(prompt)
     except Exception as e:
-        print(f"[JUDGE] LLM call failed: {e}")
+        print(f"[JUDGE] Faithfulness LLM call failed: {e}")
         return None, []
 
     text = judge_response.strip()
@@ -133,6 +150,45 @@ async def judge_faithfulness(llm, context: str, answer: str) -> tuple:
     approx_answer_sentences = max(answer.count(".") + answer.count("\n"), 1)
     score = max(0.0, 1 - len(claims) / approx_answer_sentences)
     return score, claims
+
+
+# 2026-07-10 fix: local judge model doesn't reliably follow the "clean
+# decline = 1.0 relevance" carve-out buried in the prompt -- confirmed
+# directly: both decline_nonexistent_dataset_1 and decline_wrong_paper_fact_1
+# produced textbook-correct, non-fabricating decline answers ("The sources
+# do not contain information about...") yet scored relevance=0.00. This is
+# a judge-instruction-following failure, not a pipeline failure -- same
+# class of problem as documented judge unreliability elsewhere (Ragas
+# timeouts on small model). Fix: deterministic pre-check before trusting
+# the LLM judge on this specific carve-out, same pattern as the rewriter's
+# acronym guard.
+# 2026-07-10 fix v2: exact-phrase DECLINE_PATTERNS list kept missing
+# rephrasing ("do not mention", "do not provide" -- neither was in the
+# original list, confirmed directly in eval output). The model paraphrases
+# declines a different way most runs, so listing exact phrases is
+# whack-a-mole. Switched to a structural regex that matches the
+# "do/does not + verb" and "no information/not available" *shape* of a
+# decline rather than specific wording -- catches "do not mention", "do
+# not provide", "does not contain", etc. without enumerating every verb.
+DECLINE_REGEX = re.compile(
+    r"\b(do(es)?\s+not|didn'?t|is\s+not|are\s+not|no\s+information|"
+    r"not\s+(available|found|specified|stated|mentioned|provide[d]?))\b",
+    re.IGNORECASE,
+)
+
+async def judge_relevance(llm, question: str, answer: str) -> Optional[float]:
+    """Separate from faithfulness on purpose: a grounded answer can still
+    dodge the actual question, and this axis catches that independently."""
+    if DECLINE_REGEX.search(answer):
+        return 1.0
+
+    prompt = RELEVANCE_JUDGE_PROMPT.format(question=question, answer=answer)
+    try:
+        response = await llm.generate(prompt)
+        return float(response.strip())
+    except Exception as e:
+        print(f"[JUDGE] Relevance LLM call failed: {e}")
+        return None
 
 
 async def run_answer_eval(
@@ -150,23 +206,39 @@ async def run_answer_eval(
 
     state = await run_pipeline_fn(item["question"], user_id)
     answer_text = state.get("answer", "") if isinstance(state, dict) else getattr(state, "answer", "")
-    sources = state.get("sources", []) if isinstance(state, dict) else getattr(state, "sources", [])
 
-    context_text = "\n\n".join(s.get("text", "") for s in sources) if sources else ""
-    if not context_text:
-        retrieved = await hybrid_engine.search(query=item["question"], user_id=user_id, top_k=6)
-        context_text = "\n\n".join(r["text"] for r in retrieved)
+    print(f"[RAW ANSWER] {item['id']}: {answer_text!r}")   
+
+    # 2026-07-10 fix: state["sources"] is built by AnswerAgent with text
+    # deliberately truncated to 200 chars (doc["text"][:200]) -- correct
+    # for its real purpose, a citation preview, but useless as judging
+    # context: if the supporting sentence lands past char 200 of its
+    # chunk, the faithfulness/relevance judges never see it and wrongly
+    # flag a fully-correct answer as unsupported. Confirmed directly:
+    # "4 layers" and "80K voice prompts" are both verbatim-correct per
+    # the source PDF, yet scored faithfulness=0.00 against the truncated
+    # sources text, while CriticAgent's own grounding check (which reads
+    # full-text state.retrieved_docs, not the truncated citation preview)
+    # correctly scored 1.00 on the same answer in the same run.
+    #
+    # Fix: always judge against a fresh, full-text retrieval rather than
+    # the truncated citation stub. This intentionally does NOT reuse
+    # state["sources"] at all anymore.
+    retrieved = await hybrid_engine.search(query=item["question"], user_id=user_id, top_k=6)
+    context_text = "\n\n".join(r["text"] for r in retrieved)
 
     expected_keywords = item.get("expected_answer_contains", [])
     answer_lower = answer_text.lower()
     hits = sum(1 for kw in expected_keywords if kw.lower() in answer_lower)
 
-    score, unsupported = await judge_faithfulness(llm, context_text, answer_text)
+    faith_score, unsupported = await judge_faithfulness(llm, context_text, answer_text)
+    relevance_score = await judge_relevance(llm, item["question"], answer_text)
 
     return AnswerResult(
         id=item["id"], question=item["question"], answer=answer_text,
         keyword_hits=hits, keyword_total=len(expected_keywords),
-        faithfulness_score=score, unsupported_claims=unsupported,
+        faithfulness_score=faith_score, relevance_score=relevance_score,
+        unsupported_claims=unsupported,
     )
 
 
@@ -189,10 +261,18 @@ def print_report(retrieval_results, answer_results, top_k: int):
     print("ANSWER EVAL")
     print("=" * 60)
     if answer_results:
+        faith_scores = [r.faithfulness_score for r in answer_results if r.faithfulness_score is not None]
+        rel_scores = [r.relevance_score for r in answer_results if r.relevance_score is not None]
+        if faith_scores:
+            print(f"Avg faithfulness: {sum(faith_scores)/len(faith_scores):.3f}  (n={len(faith_scores)})")
+        if rel_scores:
+            print(f"Avg relevance:    {sum(rel_scores)/len(rel_scores):.3f}  (n={len(rel_scores)})")
+        print()
         for r in answer_results:
             kw_str = f"{r.keyword_hits}/{r.keyword_total} keywords" if r.keyword_total else "n/a"
             faith_str = f"{r.faithfulness_score:.2f}" if r.faithfulness_score is not None else "judge failed"
-            print(f"  [{r.id}] keywords={kw_str}  faithfulness={faith_str}")
+            rel_str = f"{r.relevance_score:.2f}" if r.relevance_score is not None else "judge failed"
+            print(f"  [{r.id}] keywords={kw_str}  faithfulness={faith_str}  relevance={rel_str}")
             if r.unsupported_claims:
                 print(f"      unsupported claims flagged: {r.unsupported_claims}")
     else:
@@ -214,12 +294,17 @@ async def main():
 
     from app.services.retrieval.hybrid_search import HybridSearchEngine
     from app.services.llm.provider import LLMProvider  # confirmed: adjust path if this differs
-    from app.db.mongodb.client import connect_to_mongo   # NEW
+    from app.db.mongodb.client import connect_to_mongo
+    from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
 
-    await connect_to_mongo()   # NEW — without this, db=None flows through
-                                # AgentOrchestrator -> build_agent_graph -> planner/retriever,
-                                # breaking metadata lookup and document_resolver silently
-                                # (confirmed via "[DOC_RESOLVER] db is None, skipping filter")
+    await connect_to_mongo()       # without this, db=None flows through
+                                    # AgentOrchestrator -> build_agent_graph -> planner/retriever,
+                                    # breaking metadata lookup and document_resolver silently
+                                    # (confirmed via "[DOC_RESOLVER] db is None, skipping filter")
+
+    await rebuild_bm25_indexes()   # hydrates keyword_manager from Qdrant -- a fresh
+                                    # process starts with an empty BM25 index otherwise
+                                    # (confirmed via "BM25 indexed users: []")
 
     hybrid_engine = HybridSearchEngine()
     llm = LLMProvider()

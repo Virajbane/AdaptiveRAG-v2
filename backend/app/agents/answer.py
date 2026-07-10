@@ -1,8 +1,16 @@
 from app.agents.base import BaseAgent
 from app.agents.state import AgentState
 from app.agents.prompts import ANSWER_PROMPT
+import re
 
-
+def _numeric_claims_grounded(answer: str, context: str) -> bool:
+    """If a number in the answer never appears anywhere in the context
+    actually handed to the LLM, it didn't come from that context --
+    it's either training-data recall or invention."""
+    numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
+    if not numbers_in_answer:
+        return True
+    return all(num in context for num in numbers_in_answer)
 class AnswerAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
 
@@ -105,6 +113,20 @@ class AnswerAgent(BaseAgent):
             response = await self.call_llm(prompt)
             state.answer = response.strip()
 
+            declined_on_ungrounded_number = not _numeric_claims_grounded(state.answer, context)
+            if declined_on_ungrounded_number:
+                print(
+                    f"[ANSWER] Numeric claim not found verbatim in context "
+                    f"— declining rather than shipping unverified number. "
+                    f"Original answer was: {state.answer!r}"
+                )
+                state.answer = (
+                    "I found related content in the document, but couldn't verify "
+                    "a specific number for this with confidence from the retrieved "
+                    "text. This may be a figure or chart value that wasn't "
+                    "extracted as readable text."
+                )
+
             # NOTE: sources built from top_docs (the docs actually sent to
             # the LLM), not all retrieved_docs - previously these could
             # diverge if Retriever's top_k ever changed independently of
@@ -180,6 +202,8 @@ class AnswerAgent(BaseAgent):
             state.confidence_final = min(
                 state.confidence * 0.5 + avg_doc_score * 0.5, 1.0
             )
+            if declined_on_ungrounded_number:
+                state.confidence_final = min(state.confidence_final, 0.3)
 
             print(f"[ANSWER] Generated response with {len(state.sources)} sources")
             print(f"[ANSWER] Confidence: {state.confidence_final:.2f}")

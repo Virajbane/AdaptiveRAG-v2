@@ -1,7 +1,18 @@
+# PATH: frontend/Dockerfile
 # Build stage
 FROM node:20-alpine AS builder
 
 WORKDIR /app
+
+# FIX: NEXT_PUBLIC_* variables are baked into the JS bundle at BUILD time,
+# not read at container-run time. The old Dockerfile had no ARG for this,
+# so setting NEXT_PUBLIC_API_URL in docker-compose `environment:` did
+# nothing -- the frontend silently called whatever URL (or none) was
+# present when `npm run build` ran. This ARG/ENV pair fixes that: pass it
+# via `docker build --build-arg NEXT_PUBLIC_API_URL=...` or compose's
+# `build.args`.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Copy files
 COPY package*.json ./
@@ -9,7 +20,7 @@ RUN npm ci
 
 COPY . .
 
-# Build application
+# Build application (NEXT_PUBLIC_API_URL above is baked in right here)
 RUN npm run build
 
 # Production stage

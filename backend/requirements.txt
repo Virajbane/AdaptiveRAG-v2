@@ -1,3 +1,4 @@
+# PATH: backend/requirements.txt
 fastapi
 uvicorn[standard]
 python-multipart
@@ -6,16 +7,18 @@ pymongo
 motor
 redis
 
-qdrant-client
+qdrant-client==1.7.1
 
 ollama
 openai
+groq
 
 langchain
 langchain-core
 langchain-community
-langgraph
-langsmith 
+langgraph==1.2.5
+langsmith
+langchain-ollama
 
 docling
 
@@ -39,7 +42,6 @@ PyPDF2==3.0.1
 python-docx==0.8.11
 tiktoken==0.5.2
 reportlab==4.0.7
-qdrant-client==1.7.1
 rank_bm25==0.2.2
 PyMuPDF==1.23.8
 
@@ -47,7 +49,6 @@ sentence-transformers
 tavily-python==0.7.26
 
 email-validator==2.3.0
-langgraph==1.2.5
 
-
-groq
+# --- Ragas eval (formerly requirements-eval.txt, now merged here) ---
+ragas

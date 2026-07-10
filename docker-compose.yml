@@ -1,5 +1,4 @@
-version: '3.8'
-
+# PATH: docker-compose.yml  (project root)
 services:
   # MongoDB Database
   mongodb:
@@ -27,7 +26,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: rag-redis
-    command: redis-server 
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
     volumes:
@@ -36,7 +35,7 @@ services:
       - rag-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,7 +45,10 @@ services:
     image: qdrant/qdrant:latest
     container_name: rag-qdrant
     environment:
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      # FIX: Qdrant only reads QDRANT__SERVICE__API_KEY (double underscore).
+      # The old QDRANT_API_KEY var here was silently ignored -- Qdrant ran
+      # with no auth enforced regardless of what you set.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
     ports:
       - "6333:6333"
     volumes:
@@ -55,7 +57,7 @@ services:
       - rag-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -84,10 +86,25 @@ services:
       MONGODB_URL: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/rag_db?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
       OLLAMA_BASE_URL: http://ollama:11434
-      ENVIRONMENT: production
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
       TAVILY_API_KEY: ${TAVILY_API_KEY}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      # FIX: was JWT_SECRET_KEY, which settings.py never reads. Renamed to
+      # match the SECRET_KEY field pydantic-settings actually looks for.
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # FIX: these two were never passed before -- backend always fell back
+      # to its hardcoded localhost:3000 default, which breaks CORS as soon
+      # as the frontend runs on any other host/port.
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
     depends_on:
@@ -113,10 +130,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # FIX: Next.js bakes NEXT_PUBLIC_* vars in at BUILD time, not runtime.
+        # Passing this as a plain `environment:` var at container start (the
+        # old setup) did nothing to the already-built JS bundle. It must be
+        # a build arg so the Dockerfile can set it as an ENV before `npm run build`.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: rag-frontend
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      ENVIRONMENT: production
     ports:
       - "3000:3000"
     depends_on:
@@ -125,7 +145,7 @@ services:
       - rag-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
