@@ -34,6 +34,13 @@ class DoclingPDFParser:
         """
         converter = DoclingPDFParser._get_converter()
         result = converter.convert(file_path)
+        # FIX: some Docling versions return a generator/iterator from
+        # convert() instead of a single ConversionResult depending on how
+        # the source path resolves internally. Normalize by pulling the
+        # first result out if it's not already a single ConversionResult
+        # with a .document attribute.
+        if not hasattr(result, "document"):
+            result = next(iter(result))
         return result.document
 
     @staticmethod

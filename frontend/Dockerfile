@@ -20,6 +20,12 @@ RUN npm ci
 
 COPY . .
 
+# FIX: this project has no frontend/public folder, but the later
+# `COPY --from=builder /app/public ./public` step assumes one exists and
+# fails the whole build otherwise. Guarantee it exists (empty is fine --
+# Next.js doesn't require a public folder to run).
+RUN mkdir -p public
+
 # Build application (NEXT_PUBLIC_API_URL above is baked in right here)
 RUN npm run build
 
