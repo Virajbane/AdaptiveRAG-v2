@@ -19,23 +19,7 @@ class QdrantVectorDB:
     def _ensure_collection(self):
         """
         Create collection if it doesn't exist.
-
-        IMPORTANT: this used to swallow connection errors silently and
-        fall through to create_collection() as if the collection simply
-        didn't exist yet. That's wrong — a connection failure (bad URL,
-        Qdrant not started, auth issue, network timeout) is a completely
-        different situation from "the collection legitimately doesn't
-        exist." Treating them the same means a misconfigured/unreachable
-        Qdrant produces no error at all — retrieval just silently starts
-        returning zero results later, with nothing in the logs pointing
-        back to the real cause.
-
-        Now: only UnexpectedResponse / ResponseHandlingException (Qdrant's
-        actual client-side connection/response error types) are caught,
-        and they're logged loudly with the real exception before
-        re-raising — so a bad connection fails fast and visibly at
-        startup instead of failing silently and showing up as a confusing
-        "no documents found" symptom minutes later.
+        (unchanged — see previous version for full comment)
         """
         try:
             collections = self.client.get_collections()
@@ -45,11 +29,6 @@ class QdrantVectorDB:
                 f"Check that Qdrant is running and the URL is correct.\n"
                 f"  Underlying error: {type(e).__name__}: {e}"
             )
-            # Re-raise rather than falling through to create_collection().
-            # A connection failure should stop startup loudly, not silently
-            # continue as if everything's fine — continuing here would
-            # mean every later operation on self.client also fails, just
-            # without ever explaining why.
             raise
 
         existing = [c.name for c in collections.collections]
@@ -87,22 +66,39 @@ class QdrantVectorDB:
 
         Returns:
             {
-                "stored_count": int,          # points actually confirmed upserted
+                "stored_count": int,
                 "failed_count": int,
-                "failed_chunk_indices": [int, ...],  # chunk_index values that didn't make it
+                "failed_chunk_indices": [int, ...],  # ORIGINAL chunk_index
+                                                       # values (from chunk["chunk_index"]),
+                                                       # not positions within this call's
+                                                       # `chunks` list -- matters when the
+                                                       # caller has already filtered chunks
+                                                       # before calling this (which
+                                                       # document_processor.py now does).
             }
         """
         if len(chunks) != len(embeddings):
-            # This should never happen if embed_batch is fixed correctly (next
-            # stage), but if it ever does, we do NOT want to silently zip-truncate
-            # and pretend nothing's wrong -- that's the exact bug we're removing.
             raise ValueError(
                 f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) "
                 f"length mismatch -- refusing to silently truncate"
             )
 
-        # Build all points up front, each tagged with its chunk_index so we
-        # can report exactly which ones failed, not just how many.
+        # Build all points up front. IMPORTANT: the payload's chunk_index
+        # must be chunk["chunk_index"] (the ORIGINAL index stamped back in
+        # DocumentProcessor.process), NOT the loop position `i` here.
+        #
+        # Bug this fixes: document_processor.py filters out chunks that
+        # failed to embed BEFORE calling this function -- so `chunks` here
+        # may already be missing entries (e.g. original chunk #3 dropped).
+        # If we stored `i` (the position in this now-shorter list) as
+        # chunk_index, every chunk after a gap would get the WRONG
+        # chunk_index in Qdrant -- corrupting citations/search() results
+        # for any document that ever had a partial embedding failure.
+        # `i` is still used below for BATCH tracking (which batch a point
+        # belongs to for failure reporting) -- that usage is fine, since
+        # document_processor.py already un-shifts those back to real
+        # chunk_index values before returning failed_chunk_indices. Only
+        # the STORED PAYLOAD needed this fix.
         all_points = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             point = PointStruct(
@@ -111,13 +107,16 @@ class QdrantVectorDB:
                 payload={
                     "doc_id": doc_id,
                     "user_id": user_id,
-                    "chunk_index": i,
+                    "chunk_index": chunk["chunk_index"],  # FIXED: was `i`
                     "chunk_text": chunk["text"],
                     "tokens": chunk["tokens"],
                     "namespace": f"user_{user_id}"
                 }
             )
-            all_points.append((i, point))
+            # Track by chunk["chunk_index"] too, so failure reporting is
+            # already in terms of the real index -- no downstream
+            # un-shifting needed for this list.
+            all_points.append((chunk["chunk_index"], point))
 
         stored_count = 0
         failed_indices = []
@@ -136,13 +135,10 @@ class QdrantVectorDB:
             except (UnexpectedResponse, ResponseHandlingException) as e:
                 print(
                     f"[QDRANT ERROR] Batch upsert failed for doc_id={doc_id}, "
-                    f"chunk_indices={batch_indices[0]}-{batch_indices[-1]}: "
+                    f"chunk_indices={batch_indices}: "
                     f"{type(e).__name__}: {e}"
                 )
                 failed_indices.extend(batch_indices)
-                # Deliberately continue to the next batch rather than raising --
-                # a timeout on one batch of 50 shouldn't cost the other 80+
-                # chunks that would have stored fine.
 
         return {
             "stored_count": stored_count,
@@ -155,23 +151,17 @@ class QdrantVectorDB:
         query_vector: List[float],
         user_id: str,
         top_k: int = 5,
-        document_id: str = None,   # NEW — optional, scopes search to one doc
+        document_id: str = None,
     ) -> List[dict]:
         """Search for similar vectors filtered by user_id, optionally also by doc_id"""
 
         must_conditions = [
-            FieldCondition(
-                key="user_id",
-                match=MatchValue(value=user_id)
-            )
+            FieldCondition(key="user_id", match=MatchValue(value=user_id))
         ]
 
         if document_id:
             must_conditions.append(
-                FieldCondition(
-                    key="doc_id",
-                    match=MatchValue(value=document_id)
-                )
+                FieldCondition(key="doc_id", match=MatchValue(value=document_id))
             )
 
         response = self.client.search(

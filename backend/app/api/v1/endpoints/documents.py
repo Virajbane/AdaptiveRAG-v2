@@ -82,7 +82,7 @@ async def upload_document(
 
 async def process_document(doc_id: str, user_id: str, file_path: str, file_type: str, db):
     """Background task: Process uploaded document."""
-    from app.services.document.document_processor import DocumentProcessor
+    from app.services.document.processor import DocumentProcessor
     from app.services.llm.provider import LLMProvider
 
     doc_queries = DocumentQueries(db)
@@ -93,32 +93,49 @@ async def process_document(doc_id: str, user_id: str, file_path: str, file_type:
         print(f"⚠️ Failed to stamp started_at for {doc_id}: {e}")
 
     try:
-        llm = LLMProvider()  # deep-reasoning model (qwen2.5:7b) — metadata
-                             # extraction needs accurate title/author parsing,
-                             # same reasoning as AnswerAgent's model-tier fix
+        llm = LLMProvider()
         processor = DocumentProcessor(db, llm)
         result = await processor.process(file_path, file_type, user_id, doc_id)
-        ...
+
+        has_chunk_gaps = result["chunks_failed"] > 0
+        has_page_errors = bool(result["docling_page_errors"])
+
+        if not has_chunk_gaps and not has_page_errors:
+            final_status = "processed"
+        elif result["chunks_stored"] > 0:
+            final_status = "processed_with_gaps"
+        else:
+            final_status = "failed"
 
         await doc_queries.update_document_status(
             doc_id=doc_id,
-            status="processed",
+            status=final_status,
             chunks_info={
                 "count": result["chunk_count"],
                 "average_tokens": result["avg_tokens"],
                 "total_tokens": result["total_tokens"],
                 "overlap_tokens": 50,
+                "stored_count": result["chunks_stored"],
             },
+            chunks_failed=result["chunks_failed"],
+            failed_chunk_indices=result["failed_chunk_indices"],
+            docling_page_errors=result["docling_page_errors"],   # NEW
+            user_id=user_id,
         )
 
-        print(f"✅ Document {doc_id} processed: {result['chunk_count']} chunks")
+        log_msg = f"✅ Document {doc_id} processed: {result['chunks_stored']}/{result['chunk_count']} chunks stored"
+        if result["chunks_failed"]:
+            log_msg += f", {result['chunks_failed']} chunks failed"
+        if result["docling_page_errors"]:
+            log_msg += f", {len(result['docling_page_errors'])} page-level parse error(s)"
+        print(log_msg)
 
         if os.path.exists(file_path):
             os.remove(file_path)
 
     except Exception as e:
         import traceback
-        traceback.print_exc()  # Print full stack trace so we can see what's failing
+        traceback.print_exc()
         try:
             await doc_queries.update_document_status(
                 doc_id=doc_id,
@@ -128,10 +145,6 @@ async def process_document(doc_id: str, user_id: str, file_path: str, file_type:
         except Exception as inner:
             print(f"Failed to update document status: {inner}")
         print(f"❌ Error processing document {doc_id}: {e}")
-        # NOTE: file is deliberately NOT deleted on failure — this is what
-        # lets the /retry endpoint reprocess without asking the user to
-        # re-upload. It's only ever cleaned up on success (above) or by
-        # a future cleanup job for genuinely abandoned failed uploads.
 
 
 @router.get("")
@@ -190,18 +203,18 @@ async def retry_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if doc["status"] not in ("failed", "processing"):
+    if doc["status"] not in ("failed", "processing", "processed_with_gaps"):
         raise HTTPException(
             status_code=400,
-            detail=f"Document status is '{doc['status']}' — only 'failed' or "
-                   f"stuck 'processing' documents can be retried.",
+            detail=f"Document status is '{doc['status']}' — only 'failed', "
+                   f"'processed_with_gaps', or stuck 'processing' documents can be retried.",
         )
 
     if doc["status"] == "processing":
         # Only allow retrying a "processing" doc if it actually looks
-        # stale — otherwise this could race a job that's genuinely still
-        # running and kick off a duplicate processing run for the same
-        # document.
+        # stale -- a processed_with_gaps or failed doc has no such
+        # ambiguity (it's definitely not still running), so this check
+        # stays scoped to "processing" only.
         stale_docs = await doc_queries.get_stale_processing_documents(user_id, timeout_minutes=10)
         stale_ids = {str(d["_id"]) for d in stale_docs}
         if doc_id not in stale_ids:

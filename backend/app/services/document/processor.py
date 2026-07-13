@@ -30,9 +30,24 @@ class DocumentProcessor:
         file_type = file_type.lower()
         use_docling = file_type == "pdf"
 
+        page_errors = []  # only ever populated for the Docling/PDF path
+
         if use_docling:
             print("Parsing PDF via Docling (structure-aware)...")
-            doc = DoclingPDFParser.parse(file_path)
+            # FIXED: DoclingPDFParser.parse() now returns a dict
+            # ({"document", "status", "page_errors"}), not the bare
+            # DoclingDocument -- must unwrap before using it.
+            parse_result = DoclingPDFParser.parse(file_path)
+            doc = parse_result["document"]
+            page_errors = parse_result["page_errors"]
+            if page_errors:
+                # Not yet folded into chunks_failed/status decision --
+                # logged for now so it's at least visible, same as
+                # before. See open Stage 5 question: should this become
+                # part of processed_with_gaps, or its own field. Not
+                # decided yet, so not wired into the return dict below.
+                print(f"[DOCLING] {len(page_errors)} page-level error(s) "
+                      f"for doc_id={doc_id}: {page_errors}")
             opening_text = DoclingPDFParser.to_plain_text(doc)
         else:
             print(f"Parsing {file_type} document...")
@@ -65,10 +80,6 @@ class DocumentProcessor:
             chunk["doc_id"] = doc_id
             chunk["chunk_index"] = i
 
-        # Keyword index still gets ALL chunks -- BM25 indexing is local/
-        # in-memory and doesn't have the same partial-failure profile as
-        # embedding/Qdrant. If this becomes unreliable too, it gets its
-        # own stage later -- not folding it in blindly here.
         from app.services.retrieval.keyword_search import keyword_manager
         await keyword_manager.index_document(user_id, chunks)
 
@@ -76,9 +87,6 @@ class DocumentProcessor:
         chunk_texts = [c["text"] for c in chunks]
         embed_result = await self.embedder.embed_batch(chunk_texts)
 
-        # Only pass chunks/embeddings that actually succeeded into
-        # store_vectors -- keeps the two lists aligned by construction,
-        # rather than relying on store_vectors to sort it out.
         successful_chunks = []
         successful_embeddings = []
         embed_failed_indices = set(embed_result["failed_indices"])
@@ -89,10 +97,6 @@ class DocumentProcessor:
                 successful_embeddings.append(embedding)
 
         if not successful_chunks:
-            # Every single chunk failed to embed -- this is a genuine
-            # total failure, not a partial one. Raise so the document
-            # gets marked "failed", not "processed_with_gaps" with zero
-            # actual content indexed.
             raise ValueError(
                 f"All {len(chunks)} chunks failed to embed -- "
                 f"see [EMBED FAILED] logs above for details"
@@ -107,15 +111,14 @@ class DocumentProcessor:
             embeddings=successful_embeddings
         )
 
-        # Combine failure sources: chunks that never got embedded, plus
-        # chunks that embedded fine but failed to upsert to Qdrant.
-        # These are DIFFERENT chunk_index sets (store_result's indices
-        # are positions within successful_chunks, not the original
-        # chunk list) -- need to map back to original indices.
-        qdrant_failed_original_indices = [
-            successful_chunks[i]["chunk_index"]
-            for i in store_result["failed_chunk_indices"]
-        ]
+        # FIXED: store_vectors now returns failed_chunk_indices already in
+        # terms of ORIGINAL chunk_index (it uses chunk["chunk_index"]
+        # internally now, not loop position). Re-mapping via
+        # successful_chunks[i]["chunk_index"] here would be WRONG a second
+        # time over -- that re-mapping was only correct when
+        # store_vectors's indices were positions-within-successful_chunks.
+        # Just union the two sets of real indices directly now.
+        qdrant_failed_original_indices = store_result["failed_chunk_indices"]
 
         all_failed_indices = sorted(embed_failed_indices | set(qdrant_failed_original_indices))
         total_chunks = len(chunks)
@@ -130,4 +133,7 @@ class DocumentProcessor:
             "avg_tokens": sum(c["tokens"] for c in chunks) // len(chunks),
             "total_tokens": sum(c["tokens"] for c in chunks),
             "metadata": metadata,
+            "docling_page_errors": page_errors,  # not yet used by the route/schema;
+                                                   # exposed here so it's available
+                                                   # once Stage 5's open question is settled
         }
