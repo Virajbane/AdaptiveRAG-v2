@@ -165,6 +165,15 @@ async def list_documents(
             "file_size_bytes": doc["file_size_bytes"],
             "status": doc["status"],
             "chunks": doc.get("chunks", {"count": 0}),
+            "chunks_failed": doc.get("chunks_failed", 0),                    # NEW
+            "failed_chunk_indices": doc.get("failed_chunk_indices", []),     # NEW
+            "docling_page_errors": doc.get("docling_page_errors", []),       # NEW
+            "processing_error": doc.get("processing_error"),                 # NEW —
+                                                                               # was already
+                                                                               # being saved
+                                                                               # on "failed"
+                                                                               # status, just
+                                                                               # never returned
             "created_at": doc["created_at"],
         })
 

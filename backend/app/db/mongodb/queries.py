@@ -143,50 +143,50 @@ class DocumentQueries:
         return result.modified_count > 0
 
     async def update_document_status(
-    self,
-    doc_id: str,
-    status: str,
-    error: str = None,
-    chunks_info: dict = None,
-    chunks_failed: int = None,
-    failed_chunk_indices: list = None,
-    docling_page_errors: list = None,   # NEW
-    user_id: str = None,
-) -> bool:
-    """Update document status during processing"""
-    update_data = {
-        "status": status,
-        "updated_at": datetime.utcnow()
-    }
-
-    if error:
-        update_data["processing_error"] = error
-
-    if chunks_info:
-        update_data["chunks"] = chunks_info
-        update_data["vectors"] = {
-            "count": chunks_info.get("stored_count", chunks_info.get("count", 0)),
-            "stored_in_qdrant": True,
-            "namespace": f"user_{user_id}" if user_id else "",
+        self,
+        doc_id: str,
+        status: str,
+        error: str = None,
+        chunks_info: dict = None,
+        chunks_failed: int = None,
+        failed_chunk_indices: list = None,
+        docling_page_errors: list = None,   # NEW
+        user_id: str = None,
+    ) -> bool:
+        """Update document status during processing"""
+        update_data = {
+            "status": status,
+            "updated_at": datetime.utcnow()
         }
 
-    if chunks_failed is not None:
-        update_data["chunks_failed"] = chunks_failed
+        if error:
+            update_data["processing_error"] = error
 
-    if failed_chunk_indices is not None:
-        update_data["failed_chunk_indices"] = failed_chunk_indices
+        if chunks_info:
+            update_data["chunks"] = chunks_info
+            update_data["vectors"] = {
+                "count": chunks_info.get("stored_count", chunks_info.get("count", 0)),
+                "stored_in_qdrant": True,
+                "namespace": f"user_{user_id}" if user_id else "",
+            }
 
-    if docling_page_errors is not None:   # NEW -- same is-not-None guard
-                                            # pattern as the other optional
-                                            # fields, so existing callers
-                                            # that don't pass it are unaffected
-        update_data["docling_page_errors"] = docling_page_errors
+        if chunks_failed is not None:
+            update_data["chunks_failed"] = chunks_failed
 
-    result = await self.collection.update_one(
-        {"_id": ObjectId(doc_id)},
-        {"$set": update_data}
-    )
-    return result.modified_count > 0
+        if failed_chunk_indices is not None:
+            update_data["failed_chunk_indices"] = failed_chunk_indices
+
+        if docling_page_errors is not None:   # NEW -- same is-not-None guard
+                                                # pattern as the other optional
+                                                # fields, so existing callers
+                                                # that don't pass it are unaffected
+            update_data["docling_page_errors"] = docling_page_errors
+
+        result = await self.collection.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
 
     async def get_stale_processing_documents(self, user_id: str, timeout_minutes: int = 10) -> list:
         """
