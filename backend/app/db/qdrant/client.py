@@ -78,14 +78,35 @@ class QdrantVectorDB:
         doc_id: str,
         user_id: str,
         chunks: List[dict],
-        embeddings: List[List[float]]
-    ) -> int:
-        points = []
+        embeddings: List[List[float]],
+        batch_size: int = 100,
+    ) -> dict:
+        """
+        Upsert chunk vectors to Qdrant in batches, so one batch failing
+        doesn't lose vectors that would have stored fine.
 
+        Returns:
+            {
+                "stored_count": int,          # points actually confirmed upserted
+                "failed_count": int,
+                "failed_chunk_indices": [int, ...],  # chunk_index values that didn't make it
+            }
+        """
+        if len(chunks) != len(embeddings):
+            # This should never happen if embed_batch is fixed correctly (next
+            # stage), but if it ever does, we do NOT want to silently zip-truncate
+            # and pretend nothing's wrong -- that's the exact bug we're removing.
+            raise ValueError(
+                f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) "
+                f"length mismatch -- refusing to silently truncate"
+            )
+
+        # Build all points up front, each tagged with its chunk_index so we
+        # can report exactly which ones failed, not just how many.
+        all_points = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            point_id = str(uuid.uuid4())
             point = PointStruct(
-                id=point_id,
+                id=str(uuid.uuid4()),
                 vector=embedding,
                 payload={
                     "doc_id": doc_id,
@@ -96,14 +117,38 @@ class QdrantVectorDB:
                     "namespace": f"user_{user_id}"
                 }
             )
-            points.append(point)
+            all_points.append((i, point))
 
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
+        stored_count = 0
+        failed_indices = []
 
-        return len(points)
+        for batch_start in range(0, len(all_points), batch_size):
+            batch = all_points[batch_start:batch_start + batch_size]
+            batch_indices = [idx for idx, _ in batch]
+            batch_points = [pt for _, pt in batch]
+
+            try:
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch_points
+                )
+                stored_count += len(batch_points)
+            except (UnexpectedResponse, ResponseHandlingException) as e:
+                print(
+                    f"[QDRANT ERROR] Batch upsert failed for doc_id={doc_id}, "
+                    f"chunk_indices={batch_indices[0]}-{batch_indices[-1]}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                failed_indices.extend(batch_indices)
+                # Deliberately continue to the next batch rather than raising --
+                # a timeout on one batch of 50 shouldn't cost the other 80+
+                # chunks that would have stored fine.
+
+        return {
+            "stored_count": stored_count,
+            "failed_count": len(failed_indices),
+            "failed_chunk_indices": failed_indices,
+        }
 
     async def search(
         self,

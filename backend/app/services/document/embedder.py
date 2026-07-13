@@ -73,10 +73,53 @@ class EmbeddingGenerator:
         )
         return response["embedding"]
 
-    async def embed_batch(self, texts: List[str], task: str = "search_document") -> List[List[float]]:
-        """Embed multiple texts (more efficient)"""
-        embeddings = []
-        for text in texts:
-            embedding = await self.embed_text(text, task=task)
-            embeddings.append(embedding)
-        return embeddings
+    async def embed_batch(
+        self,
+        texts: List[str],
+        task: str = "search_document",
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+    ) -> dict:
+        """
+        Embed multiple texts. A single failing text (after retries) does
+        NOT fail the whole batch -- it's recorded and skipped so the
+        rest of the document still gets embedded and stored.
+
+        Returns:
+            {
+                "embeddings": [List[float] | None, ...],  # same length/order as `texts`;
+                                                            # None at any index that failed
+                "failed_indices": [int, ...],
+            }
+        """
+        embeddings: List = [None] * len(texts)
+        failed_indices = []
+
+        for i, text in enumerate(texts):
+            success = False
+            for attempt in range(1, max_retries + 1):
+                try:
+                    embeddings[i] = await self.embed_text(text, task=task)
+                    success = True
+                    break
+                except Exception as e:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** (attempt - 1))  # 1s, 2s, 4s
+                        print(
+                            f"[EMBED RETRY] chunk_index={i} attempt={attempt}/{max_retries} "
+                            f"failed ({type(e).__name__}: {e}) -- retrying in {delay}s"
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        print(
+                            f"[EMBED FAILED] chunk_index={i} gave up after "
+                            f"{max_retries} attempts: {type(e).__name__}: {e}"
+                        )
+
+            if not success:
+                failed_indices.append(i)
+
+        return {
+            "embeddings": embeddings,
+            "failed_indices": failed_indices,
+        }

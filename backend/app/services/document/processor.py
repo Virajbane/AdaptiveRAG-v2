@@ -10,25 +10,6 @@ from app.config.settings import settings
 
 
 class DocumentProcessor:
-    """
-    Orchestrate document processing pipeline.
-
-    2026-07-09: PDFs now go through Docling (structure-aware parsing +
-    heading/table-scoped chunking) instead of PyMuPDF + regex table
-    detection. Root cause: eval_rag.py surfaced two failure classes --
-    dense numeric tables losing their column labels, and chunks
-    bleeding across section boundaries (e.g. mixing "4.2 ..." tail
-    content with "4.3 Implementation Details" head content, diluting
-    the embedding enough to drop a relevant chunk out of top-20 vector
-    search). Confirmed fixed against the real failing paper via
-    validate_docling_chunker.py before this integration.
-
-    DOCX/TXT/CSV are untouched -- Docling's dependency weight
-    (torch/torchvision/layout+table models) is only worth paying where
-    it solves a problem we've actually measured; those formats don't
-    have PDF's table-fragmentation or PyMuPDF block-ordering issues.
-    """
-
     def __init__(self, db, llm):
         self.db = db
         self.parser = DocumentParser()
@@ -36,7 +17,7 @@ class DocumentProcessor:
         self.docling_chunker = DoclingChunker()
         self.embedder = EmbeddingGenerator(ollama_url=settings.OLLAMA_BASE_URL)
         self.vector_db = QdrantVectorDB()
-        self.metadata_extractor = MetadataExtractor(llm)  # pass main llm, not fast_llm
+        self.metadata_extractor = MetadataExtractor(llm)
 
     async def process(
         self,
@@ -60,8 +41,6 @@ class DocumentProcessor:
                 raise ValueError("Document is empty after parsing")
             opening_text = text[:2500]
 
-        # Extract metadata BEFORE chunking -- needs raw opening text,
-        # not a 150-token chunk of it.
         print("Extracting document metadata...")
         metadata = await self.metadata_extractor.extract(opening_text)
         if metadata:
@@ -72,8 +51,6 @@ class DocumentProcessor:
             if update_result.matched_count == 0:
                 print(f"[METADATA] WARNING: update_one matched 0 documents "
                       f"for doc_id={doc_id!r} — metadata not saved")
-            else:
-                print(f"[METADATA] Saved metadata for doc_id={doc_id}")
 
         print("Chunking...")
         if use_docling:
@@ -88,25 +65,69 @@ class DocumentProcessor:
             chunk["doc_id"] = doc_id
             chunk["chunk_index"] = i
 
+        # Keyword index still gets ALL chunks -- BM25 indexing is local/
+        # in-memory and doesn't have the same partial-failure profile as
+        # embedding/Qdrant. If this becomes unreliable too, it gets its
+        # own stage later -- not folding it in blindly here.
         from app.services.retrieval.keyword_search import keyword_manager
         await keyword_manager.index_document(user_id, chunks)
 
         print(f"Generating embeddings for {len(chunks)} chunks...")
         chunk_texts = [c["text"] for c in chunks]
-        embeddings = await self.embedder.embed_batch(chunk_texts)
+        embed_result = await self.embedder.embed_batch(chunk_texts)
 
-        print("Storing vectors in Qdrant...")
-        vectors_stored = await self.vector_db.store_vectors(
+        # Only pass chunks/embeddings that actually succeeded into
+        # store_vectors -- keeps the two lists aligned by construction,
+        # rather than relying on store_vectors to sort it out.
+        successful_chunks = []
+        successful_embeddings = []
+        embed_failed_indices = set(embed_result["failed_indices"])
+
+        for chunk, embedding in zip(chunks, embed_result["embeddings"]):
+            if embedding is not None:
+                successful_chunks.append(chunk)
+                successful_embeddings.append(embedding)
+
+        if not successful_chunks:
+            # Every single chunk failed to embed -- this is a genuine
+            # total failure, not a partial one. Raise so the document
+            # gets marked "failed", not "processed_with_gaps" with zero
+            # actual content indexed.
+            raise ValueError(
+                f"All {len(chunks)} chunks failed to embed -- "
+                f"see [EMBED FAILED] logs above for details"
+            )
+
+        print(f"Storing {len(successful_chunks)} vectors in Qdrant "
+              f"({len(embed_failed_indices)} skipped due to embed failure)...")
+        store_result = await self.vector_db.store_vectors(
             doc_id=doc_id,
             user_id=user_id,
-            chunks=chunks,
-            embeddings=embeddings
+            chunks=successful_chunks,
+            embeddings=successful_embeddings
         )
 
+        # Combine failure sources: chunks that never got embedded, plus
+        # chunks that embedded fine but failed to upsert to Qdrant.
+        # These are DIFFERENT chunk_index sets (store_result's indices
+        # are positions within successful_chunks, not the original
+        # chunk list) -- need to map back to original indices.
+        qdrant_failed_original_indices = [
+            successful_chunks[i]["chunk_index"]
+            for i in store_result["failed_chunk_indices"]
+        ]
+
+        all_failed_indices = sorted(embed_failed_indices | set(qdrant_failed_original_indices))
+        total_chunks = len(chunks)
+        total_failed = len(all_failed_indices)
+        total_succeeded = total_chunks - total_failed
+
         return {
-            "chunk_count": len(chunks),
+            "chunk_count": total_chunks,
+            "chunks_stored": total_succeeded,
+            "chunks_failed": total_failed,
+            "failed_chunk_indices": all_failed_indices,
             "avg_tokens": sum(c["tokens"] for c in chunks) // len(chunks),
             "total_tokens": sum(c["tokens"] for c in chunks),
-            "vectors_stored": vectors_stored,
             "metadata": metadata,
         }

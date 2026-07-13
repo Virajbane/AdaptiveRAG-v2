@@ -1,259 +1,1161 @@
 [
   {
-    "id": "retrieval_table_data_1",
-    "question": "What accuracy did Lychee-FD achieve on TriviaQA in the speech-to-speech (S->S) setting?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["39.4"],
-    "document_id": null,
-    "note": "Table 1 data row -- known weak point (BM25-only test showed this NOT FOUND@6 due to table/header fragmentation)."
-  },
-  {
-    "id": "retrieval_prose_dataset_1",
-    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["140K", "140,000"],
-    "document_id": null
-  },
-  {
-    "id": "retrieval_prose_gpu_1",
-    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["8", "H20"],
-    "document_id": null
-  },
-  {
-    "id": "answer_utmos_score_1",
-    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
-    "type": "answer",
-    "expected_answer_contains": ["4.50"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Value sits inside a figure's plotted data points, heavily fragmented by PDF text extraction."
-  },
-  {
-    "id": "answer_metadata_authors_1",
-    "question": "Who are the authors of this paper?",
-    "type": "answer",
-    "expected_answer_contains": ["Zhenyu Liu", "Yunxin Li", "Baotian Hu"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Tests MetadataExtractor, separate from chunk retrieval entirely."
-  },
-  {
-    "id": "retrieval_prose_gflops_1",
-    "question": "What GPU model and count trained Lychee-FD, and how many H20 GPUs?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["8", "H20"],
-    "document_id": null,
-    "note": "Section 4.3 Implementation Details -- prose, should be easy recall"
-  },
-  {
-    "id": "retrieval_prose_params_1",
-    "question": "How many total parameters does Lychee-FD have?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["10B", "10 billion"],
-    "document_id": null
-  },
-  {
     "id": "retrieval_prose_backbone_1",
     "question": "What half-duplex backbone model does Lychee-FD build on?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["StepAudio-2-mini"],
-    "document_id": null
-  },
-  {
-    "id": "retrieval_table_takeover_1",
-    "question": "What Takeover Rate (TOR) did Lychee-FD achieve on the spoken QA benchmarks?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["100"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "StepAudio-2-mini"
+    ],
     "document_id": null,
-    "note": "Table 1 -- same fragmentation risk class as the TriviaQA S->S question"
-  },
-  {
-    "id": "retrieval_table_srr_1",
-    "question": "What Success-Replies Rate (SRR) did Lychee-FD get on FDBench?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["86.3"],
-    "document_id": null,
-    "note": "Table 2 -- different table, different column layout than Table 1; good test of whether the Docling fix generalizes"
-  },
-  {
-    "id": "retrieval_figure_gradient_1",
-    "question": "In the fully shared baseline, what is the gradient influence score of the text task on the speech task?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["-0.129"],
-    "document_id": null,
-    "note": "Figure 9 -- numeric value embedded in a heatmap image, same failure class as UTMOS. Deliberately adversarial."
-  },
-  {
-    "id": "answer_llamaq_layers_1",
-    "question": "How many separated layers did the layer ablation study identify as optimal?",
-    "type": "answer",
-    "expected_answer_contains": ["4"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Section 7 -- prose, not a figure. Should be an easy pass, useful as a contrast case against the UTMOS/gradient-figure failures."
-  },
-  {
-    "id": "answer_dataset_pipeline_1",
-    "question": "How many voice prompts were used for zero-shot cloning in the training data pipeline?",
-    "type": "answer",
-    "expected_answer_contains": ["80K", "80,000"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Section 4.2 -- prose fact, different section than the existing 140K dataset question"
-  },
-  {
-    "id": "answer_utmos_freezeomni_1",
-    "question": "What UTMOS score did Freeze-Omni achieve for speech synthesis quality?",
-    "type": "answer",
-    "expected_answer_contains": ["4.21"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Same Figure 4 chart as the existing UTMOS question but a DIFFERENT bar. If this also fails, confirms it's a figure-extraction gap, not something specific to the Lychee-FD bar."
-  },
-  {
-    "id": "decline_nonexistent_dataset_1",
-    "question": "What accuracy did Lychee-FD achieve on the SQuAD benchmark?",
-    "type": "answer",
-    "expected_answer_contains": ["not found", "not mentioned", "does not", "do not contain", "no information", "not available"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "SQuAD is never mentioned in this paper (only LlamaQ/WebQ/TriviaQA). Tests whether the system declines vs. hallucinates a plausible-sounding number."
-  },
-  {
-    "id": "decline_wrong_paper_fact_1",
-    "question": "How many parameters does GPT-4o have according to this paper?",
-    "type": "answer",
-    "expected_answer_contains": ["not found", "not mentioned", "does not specify", "no information"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "GPT-4o system card is in References but no parameter count is stated anywhere in this paper's body. Tests hallucination-from-training-knowledge."
-  },
-  {
-    "id": "retrieval_prose_limitation_1",
-    "question": "What limitation does the paper identify regarding side-talk in full-duplex settings?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["side-talk", "third party", "multi-speaker"],
-    "document_id": null,
-    "note": "Section 8.2 / Limitations -- tests whether qualitative (non-numeric) content retrieves well"
-  },
-  {
-    "id": "retrieval_prose_authors_correspondence_1",
-    "question": "Who is listed as the corresponding author of this paper?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["Baotian Hu"],
-    "document_id": null,
-    "note": "Tests whether a specific single-author fact is retrievable from body text, not just the metadata shortcut"
-  },
-  {
-    "id": "retrieval_prose_optimizer_1",
-    "question": "What optimizer and learning rate were used to train Lychee-FD?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["AdamW", "3e-6"],
-    "document_id": null,
-    "note": "Section 4.3 -- verified against paper: 'We optimize our model using AdamW ... with a learning rate of 3e-6'"
-  },
-  {
-    "id": "retrieval_prose_headlayers_1",
-    "question": "How many layers are in the shared backbone, and how many layers each for the text, speech, and control heads?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["24", "4", "2"],
-    "document_id": null,
-    "note": "Section 4.3 -- verified: shared backbone of 24 layers; heads configured with 4 (text), 4 (speech), 2 (control) layers"
+    "note": "Sec 3.2 -- verified: 'We choose StepAudio-2-mini ... as our half-duplex backbone'"
   },
   {
     "id": "retrieval_prose_encoder_1",
     "question": "What audio encoder does Lychee-FD use for processing input audio?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["Whisper-v3-large"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Whisper-v3-large"
+    ],
     "document_id": null,
-    "note": "Section 3.2 -- verified: 'We employ the Whisper-v3-large encoder for input audio processing'"
+    "note": "Sec 3.2 -- verified: 'We employ the Whisper-v3-large encoder'"
   },
   {
     "id": "retrieval_prose_tokenizer_1",
     "question": "What tokenizer does Lychee-FD use to convert audio into discrete speech tokens?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["CosyVoice2"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "CosyVoice2"
+    ],
     "document_id": null,
-    "note": "Section 3.2 -- verified: 'we adopt the CosyVoice2 tokenizer'"
+    "note": "Sec 3.2 -- verified: 'we adopt the CosyVoice2 tokenizer'"
   },
   {
     "id": "retrieval_prose_framerate_1",
     "question": "At what frame rate does Lychee-FD's acoustic tokenizer operate?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["25Hz", "25 Hz"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "25Hz",
+      "25 Hz"
+    ],
     "document_id": null,
-    "note": "Section 3.2 -- verified: 'convert audio into discrete speech tokens at a 25Hz frame rate'"
+    "note": "Sec 3.2 -- verified: 'discrete speech tokens at a 25Hz frame rate'"
   },
   {
-    "id": "retrieval_table_llamaq_1",
-    "question": "What LlamaQ speech-to-text (S->T) accuracy did Lychee-FD achieve?",
+    "id": "retrieval_prose_optimizer_1",
+    "question": "What optimizer and learning rate were used to train Lychee-FD?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["73.7"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "AdamW",
+      "3e-6"
+    ],
     "document_id": null,
-    "note": "Table 1, LlamaQ S->T column -- same fragmentation risk class as TriviaQA question"
+    "note": "Sec 4.3 -- verified: 'AdamW ... with a learning rate of 3e-6'"
   },
   {
-    "id": "answer_ablation_semchannel_1",
-    "question": "How much did removing the semantic alignment channel (w/o Sem-Channel) reduce S->T and S->S accuracy?",
-    "type": "answer",
-    "expected_answer_contains": ["5.6", "5.4"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Section 4.4 Ablation discussion -- verified: 'significant performance decline in both S -> T (5.6%) and S -> S (5.4%)'"
+    "id": "retrieval_prose_gpu_1",
+    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "8",
+      "H20"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: '8 NVIDIA H20 GPUs'"
   },
   {
-    "id": "answer_ablation_paramsep_1",
-    "question": "What speech accuracy did the w/o Param-Sep ablation variant drop to?",
-    "type": "answer",
-    "expected_answer_contains": ["27.6"],
-    "document_id": "6a4f8d62a26380c30df30ba6",
-    "note": "Section 4.4 -- verified: 'its speech accuracy suffers a catastrophic drop to 27.6%'"
+    "id": "retrieval_prose_batchsize_1",
+    "question": "What global batch size was used during Lychee-FD training?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "32"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'a global batch size of 32'"
+  },
+  {
+    "id": "retrieval_prose_warmup_1",
+    "question": "What warmup ratio was used to train Lychee-FD?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "0.1"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'We set the warmup ratio to 0.1'"
+  },
+  {
+    "id": "retrieval_prose_traintime_1",
+    "question": "Approximately how long did one epoch of Lychee-FD training take?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "16 hours"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'takes approximately 16 hours'"
+  },
+  {
+    "id": "retrieval_prose_seeds_1",
+    "question": "How many random seeds were used to evaluate Lychee-FD, and how was the result reported?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "three",
+      "3"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'evaluate our model with three random seeds and report their average'"
+  },
+  {
+    "id": "retrieval_prose_params_1",
+    "question": "How many total parameters does Lychee-FD have?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "10B",
+      "10 billion"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'approximately 10B total parameters'"
+  },
+  {
+    "id": "retrieval_prose_headlayers_1",
+    "question": "How many layers are in the shared backbone, and how many layers each for the text, speech, and control heads?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "24",
+      "4",
+      "2"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: shared backbone 24 layers; heads 4 (text), 4 (speech), 2 (control)"
+  },
+  {
+    "id": "retrieval_prose_dataset_1",
+    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "140K",
+      "140,000"
+    ],
+    "document_id": null,
+    "note": "Sec 4.2 -- verified: 'a final dataset of approximately 140K full-duplex dialogue instances'"
+  },
+  {
+    "id": "retrieval_prose_voiceprompts_1",
+    "question": "How many predefined voice prompts were used for zero-shot cloning in the data synthesis pipeline?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "80K",
+      "80,000"
+    ],
+    "document_id": null,
+    "note": "Sec 4.2 -- verified: 'coupled with 80K predefined voice prompts for zero-shot cloning'"
   },
   {
     "id": "retrieval_prose_moshi_drop_1",
     "question": "What speech intelligence drop did Moshi report after full-duplex alignment, according to this paper?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["-12.7", "12.7"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "-12.7",
+      "12.7"
+    ],
     "document_id": null,
-    "note": "Section 1 Introduction -- verified: 'Moshi ... reports a significant drop in speech intelligence (-12.7% on LlamaQ)'"
-  },
-  {
-    "id": "retrieval_figure_influence_1",
-    "question": "Under Lychee-FD's Hierarchical Parameter Separation, what is the global influence score of the text task on the speech task?",
-    "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["0.205"],
-    "document_id": null,
-    "note": "Figure 9 (right panel) + Section 9 body text -- verified: 'the influence score of text on speech shifts to a positive value (0.205)'"
+    "note": "Sec 1 -- verified: 'Moshi ... reports a significant drop in speech intelligence (-12.7% on LlamaQ)'"
   },
   {
     "id": "retrieval_prose_userstyles_1",
     "question": "How many distinct communication styles can the User Agent be sampled from in the data synthesis pipeline?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["19"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "19"
+    ],
     "document_id": null,
-    "note": "Section 11.1 -- verified: 'a Speaking Style (sampled from 19 distinct styles such as Concise and logical, Impatient, Humorous and witty)'"
+    "note": "Sec 11.1 -- verified: 'a Speaking Style (sampled from 19 distinct styles ...)'"
   },
   {
     "id": "retrieval_prose_backchannel_prob_1",
     "question": "What is the probability used for backchannel injection during post-processing in the data synthesis pipeline?",
     "type": "retrieval",
-    "expected_doc_id": "6a4f8d62a26380c30df30ba6",
-    "expected_answer_contains": ["0.5", "p=0.5", "p = 0.5"],
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "0.5",
+      "p=0.5",
+      "p = 0.5"
+    ],
     "document_id": null,
-    "note": "Section 11.2 -- verified: 'Backchannels are injected probabilistically (p = 0.5) during post-processing'"
+    "note": "Sec 11.2 -- verified: 'Backchannels are injected probabilistically (p = 0.5)'"
+  },
+  {
+    "id": "retrieval_prose_interrupt_turns_1",
+    "question": "Between which conversation turns are random interruptions scheduled in the data synthesis pipeline?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "turns 2 and 4",
+      "2 and 4"
+    ],
+    "document_id": null,
+    "note": "Sec 11.2 -- verified: 'Random interruptions are scheduled between turns 2 and 4'"
+  },
+  {
+    "id": "retrieval_prose_motivations_1",
+    "question": "What are the five interruption motivations the User Agent can choose from?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Correction",
+      "Deeper Inquiry",
+      "Topic Shift",
+      "Strong Emotional Reaction",
+      "Impatience"
+    ],
+    "document_id": null,
+    "note": "Sec 11.2 -- verified list of 5 motivations"
+  },
+  {
+    "id": "retrieval_prose_reviewer_dims_1",
+    "question": "Across what three dimensions does the Reviewer Agent score a synthesized dialogue?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Persona Consistency",
+      "Quality of Interruption Event",
+      "Naturalness of Backchannels"
+    ],
+    "document_id": null,
+    "note": "Sec 11.3 -- verified: three scoring dimensions listed"
+  },
+  {
+    "id": "retrieval_prose_limitation_1",
+    "question": "What limitation does the paper identify regarding side-talk in full-duplex settings?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "side-talk",
+      "third party",
+      "multi-speaker"
+    ],
+    "document_id": null,
+    "note": "Sec 8.2 / Limitations -- qualitative, non-numeric retrieval test"
+  },
+  {
+    "id": "retrieval_prose_authors_correspondence_1",
+    "question": "Who is listed as the corresponding author of this paper?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Baotian Hu"
+    ],
+    "document_id": null,
+    "note": "Title page -- verified: '⊠ Corresponding author' marks Baotian Hu"
+  },
+  {
+    "id": "retrieval_prose_transcription_1",
+    "question": "What model is used to transcribe generated speech in the speech-to-speech (S->S) evaluation setting?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Whisper-large-v3",
+      "Whisper-v3"
+    ],
+    "document_id": null,
+    "note": "Sec 4.4 -- verified: 'we leverage Whisper-large-v3 ... to obtain the transcription'"
+  },
+  {
+    "id": "retrieval_prose_gpt4o_classify_1",
+    "question": "What model is used by FullDuplexBench 1.5 to classify model responses to interruptions and backchannels?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "GPT-4o-1124"
+    ],
+    "document_id": null,
+    "note": "Sec 4.5 -- verified: 'FullDuplexBench 1.5 utilizes GPT-4o-1124 to classify model responses'"
+  },
+  {
+    "id": "retrieval_prose_categories_1",
+    "question": "Into what four categories does FullDuplexBench 1.5 classify model responses?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "Response",
+      "Resume",
+      "Uncertain",
+      "Unknown"
+    ],
+    "document_id": null,
+    "note": "Sec 4.5 -- verified four-category classification"
+  },
+  {
+    "id": "retrieval_prose_epoch_1",
+    "question": "For how many epochs was Lychee-FD trained?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "1 epoch",
+      "one epoch"
+    ],
+    "document_id": null,
+    "note": "Sec 4.3 -- verified: 'train for 1 epoch'"
+  },
+  {
+    "id": "retrieval_table_triviaqa_ss_1",
+    "question": "What accuracy did Lychee-FD achieve on TriviaQA in the speech-to-speech (S->S) setting?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "39.4"
+    ],
+    "document_id": null,
+    "note": "Table 1 -- known weak point, table/header fragmentation risk"
+  },
+  {
+    "id": "retrieval_table_triviaqa_st_1",
+    "question": "What accuracy did Lychee-FD achieve on TriviaQA in the speech-to-text (S->T) setting?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "42.5"
+    ],
+    "document_id": null,
+    "note": "Table 1 -- same row as above, different column"
+  },
+  {
+    "id": "retrieval_table_llamaq_st_1",
+    "question": "What LlamaQ speech-to-text (S->T) accuracy did Lychee-FD achieve?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "73.7"
+    ],
+    "document_id": null,
+    "note": "Table 1, LlamaQ S->T column"
+  },
+  {
+    "id": "retrieval_table_webq_ss_1",
+    "question": "What WebQ speech-to-speech (S->S) accuracy did Lychee-FD achieve?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "33.9"
+    ],
+    "document_id": null,
+    "note": "Table 1, WebQ S->S column"
+  },
+  {
+    "id": "retrieval_table_takeover_1",
+    "question": "What Takeover Rate (TOR) did Lychee-FD achieve on the spoken QA benchmarks?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "100"
+    ],
+    "document_id": null,
+    "note": "Table 1 -- same fragmentation risk class as the TriviaQA question"
+  },
+  {
+    "id": "retrieval_table_stepaudio_llamaq_1",
+    "question": "What LlamaQ S->T accuracy did the StepAudio-2-mini half-duplex backbone achieve?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "74.7"
+    ],
+    "document_id": null,
+    "note": "Table 1, StepAudio-2-mini row -- tests table row disambiguation"
+  },
+  {
+    "id": "retrieval_table_srr_1",
+    "question": "What Success-Replies Rate (SRR) did Lychee-FD get on FDBench?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "86.3"
+    ],
+    "document_id": null,
+    "note": "Table 2 -- different table/column layout than Table 1; good generalization test"
+  },
+  {
+    "id": "retrieval_table_sir_1",
+    "question": "What Success-Interrupts Rate (SIR) did Lychee-FD achieve on FDBench?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "99.7"
+    ],
+    "document_id": null,
+    "note": "Table 2 -- adjacent column to SRR, tests cross-entity precision"
+  },
+  {
+    "id": "retrieval_table_stop_1",
+    "question": "What interruption stop delay (Stop.) did Lychee-FD achieve on FullDuplexBench 1.5, in milliseconds?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "570"
+    ],
+    "document_id": null,
+    "note": "Table 2 -- note there are TWO 'Stop.' columns (FDBench=840, FD1.5=570); adversarial cross-entity test"
+  },
+  {
+    "id": "retrieval_table_moshi_srr_1",
+    "question": "What Success-Replies Rate (SRR) did Moshi achieve on FDBench?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "41.4"
+    ],
+    "document_id": null,
+    "note": "Table 2, Moshi row -- tests retrieval doesn't default to the Lychee-FD row"
+  },
+  {
+    "id": "retrieval_figure_gradient_1",
+    "question": "In the fully shared baseline, what is the gradient influence score of the text task on the speech task?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "-0.129"
+    ],
+    "document_id": null,
+    "note": "Figure 9 -- numeric value embedded in a heatmap image, same failure class as UTMOS"
+  },
+  {
+    "id": "retrieval_figure_influence_hier_textspeech_1",
+    "question": "Under Lychee-FD's Hierarchical Parameter Separation, what is the influence score of text on speech?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "0.205"
+    ],
+    "document_id": null,
+    "note": "Figure 9 (right panel) + Sec 9 body text -- verified: 'shifts to a positive value (0.205)'"
+  },
+  {
+    "id": "retrieval_figure_influence_speechtext_shared_1",
+    "question": "In the fully shared baseline, what is the influence score of speech on text?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "0.312"
+    ],
+    "document_id": null,
+    "note": "Figure 9 left panel -- verified in Sec 9 body: 'from 0.312 to 0.773'"
+  },
+  {
+    "id": "retrieval_figure_influence_speechtext_hier_1",
+    "question": "Under Hierarchical Parameter Separation, what is the influence score of speech on text?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "0.773"
+    ],
+    "document_id": null,
+    "note": "Figure 9 right panel -- verified: constructive synergy 'amplified (from 0.312 to 0.773)'"
+  },
+  {
+    "id": "retrieval_figure_utmos_lychee_1",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": null,
+    "note": "Figure 4 -- value sits inside a bar chart, heavily fragmented by PDF text extraction"
+  },
+  {
+    "id": "retrieval_figure_utmos_stepaudio_1",
+    "question": "What UTMOS score did the Step-Audio-2 backbone achieve?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "4.44"
+    ],
+    "document_id": null,
+    "note": "Figure 4 -- adjacent bar to Lychee-FD's, tests bar disambiguation"
+  },
+  {
+    "id": "retrieval_figure_layerablation_saturate_1",
+    "question": "At what accuracy value does the LlamaQ layer-ablation curve start (0 separated layers)?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "36.0"
+    ],
+    "document_id": null,
+    "note": "Figure 6 / Sec 7 body text -- verified: 'surging from 36.0 to 65.4 as the depth increases to 4 layers'"
+  },
+  {
+    "id": "retrieval_figure_layerablation_peak_1",
+    "question": "What accuracy does the LlamaQ layer-ablation curve reach at 4 separated layers?",
+    "type": "retrieval",
+    "expected_doc_id": "6a549f0f62642be451689205",
+    "expected_answer_contains": [
+      "65.4"
+    ],
+    "document_id": null,
+    "note": "Figure 6 / Sec 7 -- same sentence as above, adjacent number, adversarial pairing"
+  },
+  {
+    "id": "answer_ablation_semchannel_1",
+    "question": "How much did removing the semantic alignment channel (w/o Sem-Channel) reduce S->T and S->S accuracy?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "5.6",
+      "5.4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 -- verified: 'S -> T (5.6%) and S -> S (5.4%)'"
+  },
+  {
+    "id": "answer_ablation_paramsep_1",
+    "question": "What speech accuracy did the w/o Param-Sep ablation variant drop to?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "27.6"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 -- verified: 'its speech accuracy suffers a catastrophic drop to 27.6%'"
+  },
+  {
+    "id": "answer_utmos_lychee_1",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Figure 4 -- cross-checked against retrieval_figure_utmos_lychee_1"
+  },
+  {
+    "id": "answer_utmos_freezeomni_1",
+    "question": "What UTMOS score did Freeze-Omni achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.21"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Same Figure 4 chart, different bar than the Lychee-FD UTMOS question"
+  },
+  {
+    "id": "answer_utmos_moshi_1",
+    "question": "What UTMOS score did Moshi achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "3.31"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Figure 4 -- lowest bar in the chart, adjacent-value fabrication risk (near 3.72/4.21)"
+  },
+  {
+    "id": "answer_utmos_woparamsep_1",
+    "question": "What UTMOS score did the Lychee-FD (w/o Param-Sep) variant achieve?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "3.72"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Figure 4 -- tests confusion between the two Lychee-FD bars (4.50 vs 3.72)"
+  },
+  {
+    "id": "answer_llamaq_layers_1",
+    "question": "How many separated layers did the layer ablation study identify as optimal?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 7 -- prose, not a figure; contrast case vs UTMOS/gradient-figure failures"
+  },
+  {
+    "id": "answer_dataset_pipeline_1",
+    "question": "How many voice prompts were used for zero-shot cloning in the training data pipeline?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "80K",
+      "80,000"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.2 -- prose fact, different section than the 140K dataset question"
+  },
+  {
+    "id": "answer_funaudio_comparison_st_1",
+    "question": "By how much does Lychee-FD improve S->T accuracy over Fun-Audio-Chat?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "8.8"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 -- verified: 'delivers a substantial improvement of 7.4% in S -> S accuracy and 8.8% in S -> T accuracy'"
+  },
+  {
+    "id": "answer_funaudio_comparison_ss_1",
+    "question": "By how much does Lychee-FD improve S->S accuracy over Fun-Audio-Chat?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "7.4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 -- same sentence as above, paired numeric adjacent to 8.8; tests cross-entity attribution"
+  },
+  {
+    "id": "answer_vita_comparison_1",
+    "question": "By how much does Lychee-FD outperform VITA-1.5 in S->S accuracy?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "10.8"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 -- verified: 'demonstrates superior reasoning capabilities (10.8% in S -> S and 0.7% in S -> T)'"
+  },
+  {
+    "id": "answer_backbone_recovery_1",
+    "question": "By how much does Lychee-FD surpass its half-duplex backbone in the S->S setting?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "5.3"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.4 Discussion -- verified: 'surpasses it in both S -> T (+0.2%) and S -> S (+5.3%)'"
+  },
+  {
+    "id": "answer_fdbench15_gain_1",
+    "question": "What average improvement does Lychee-FD deliver over system-level baselines on FullDuplexBench 1.5?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "28.5"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Abstract + Sec 4.5 -- verified: '28.5% average improvement over system-level baselines'"
+  },
+  {
+    "id": "answer_gflops_range_1",
+    "question": "What is the approximate inference cost range (in GFLOPs) shown on the x-axis of the efficiency/intelligence trade-off figure?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "140",
+      "240"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Figure 1 -- verified axis range '140 160 180 200 220 240'"
+  },
+  {
+    "id": "answer_moshi_gradient_layers_1",
+    "question": "In the Moshi architecture gradient analysis, in which layer range does task synergy hold, and where does conflict emerge?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "0-19",
+      "23-31"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 5 -- verified: 'Shallow layers (0-19) maintain positive similarity ... negative values in deep layers (23-31)'"
+  },
+  {
+    "id": "answer_lychee_shallow_layers_1",
+    "question": "In Lychee-FD's own gradient cosine similarity analysis, over what layer range is the similarity positive (task synergy)?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "0-9",
+      "shallow"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 3.2 -- verified: 'In the shallow layers (0-9), the cosine similarity is positive'"
+  },
+  {
+    "id": "decline_nonexistent_dataset_1",
+    "question": "What accuracy did Lychee-FD achieve on the SQuAD benchmark?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not",
+      "do not contain",
+      "no information",
+      "not available"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "SQuAD is never mentioned (only LlamaQ/WebQ/TriviaQA). Tests decline vs. hallucinated number."
+  },
+  {
+    "id": "decline_gpt4o_params_1",
+    "question": "How many parameters does GPT-4o have according to this paper?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not specify",
+      "no information"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "GPT-4o system card is in References but no parameter count is stated in this paper's body."
+  },
+  {
+    "id": "decline_glue_benchmark_1",
+    "question": "What score did Lychee-FD achieve on the GLUE benchmark?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not",
+      "no information",
+      "not available"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "GLUE is never mentioned anywhere in this paper. Pure hallucination trap."
+  },
+  {
+    "id": "decline_utmos_vita_1",
+    "question": "What UTMOS score did VITA-1.5 achieve?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not",
+      "no information",
+      "not available"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Figure 4 UTMOS chart only shows Freeze-Omni, Moshi, Step-Audio-2, Lychee-FD, and Lychee-FD w/o Param-Sep -- VITA-1.5 is NOT one of the bars, despite appearing in Table 1/2. Tests cross-table confusion."
+  },
+  {
+    "id": "decline_dgslm_utmos_1",
+    "question": "What UTMOS score did dGSLM achieve?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not",
+      "no information",
+      "not available"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "dGSLM appears in Tables 1 and 2 but is absent from the Figure 4 UTMOS comparison. Same trap class as VITA-1.5."
+  },
+  {
+    "id": "decline_paramcount_freezeomni_1",
+    "question": "How many total parameters does Freeze-Omni have?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "does not",
+      "no information",
+      "not available"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Only Lychee-FD's ~10B parameter count is stated; baseline parameter counts are never given."
+  },
+  {
+    "id": "decline_llamaq_wer_1",
+    "question": "What exact Word Error Rate (WER) number did Lychee-FD achieve on LlamaQ?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "not specified",
+      "no information",
+      "does not"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Sec 4.6 states WER is used as a metric but no concrete WER numeric value is reported in the visible text -- tests whether the system invents a plausible-sounding percentage."
+  },
+  {
+    "id": "decline_trainingcost_dollars_1",
+    "question": "How much did it cost, in dollars, to train Lychee-FD?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "no information",
+      "not available",
+      "does not"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Training cost in GPU-hours is inferable (8xH20, ~16h) but a dollar cost is never stated. Tests inference-based fabrication."
+  },
+  {
+    "id": "decline_iclr_venue_1",
+    "question": "At which conference was this Lychee-FD paper published?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "no information",
+      "does not specify",
+      "arxiv"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "This is an arXiv preprint (arXiv:2607.06540v1); no conference/venue acceptance is stated in the document."
+  },
+  {
+    "id": "decline_openai_model_param_1",
+    "question": "How many parameters does the half-duplex backbone StepAudio-2 (non-mini) have, as distinct from StepAudio-2-mini?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "not found",
+      "not mentioned",
+      "no information",
+      "does not specify"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Only StepAudio-2-mini is used/discussed as the backbone; the full StepAudio-2's parameter count is never given in this paper."
+  },
+  {
+    "id": "answer_metadata_authors_1",
+    "question": "Who are the authors of this paper?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Zhenyu Liu",
+      "Yunxin Li",
+      "Baotian Hu"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Tests MetadataExtractor, separate from chunk retrieval entirely."
+  },
+  {
+    "id": "answer_metadata_arxiv_id_1",
+    "question": "What is the arXiv identifier of this paper?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "2607.06540"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Title page footer -- verified: 'arXiv:2607.06540v1 [cs.CL] 7 Jul 2026'"
+  },
+  {
+    "id": "answer_metadata_affiliation_1",
+    "question": "What university is the corresponding author affiliated with?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Harbin Institute of Technology"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Title page -- verified affiliation 1 for Baotian Hu"
+  },
+  {
+    "id": "cache_exact_gpu_1a",
+    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "8",
+      "H20"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_gpu_1b",
+    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "8",
+      "H20"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_params_1a",
+    "question": "How many total parameters does Lychee-FD have?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "10B",
+      "10 billion"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_params_1b",
+    "question": "How many total parameters does Lychee-FD have?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "10B",
+      "10 billion"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_utmos_1a",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_utmos_1b",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_dataset_1a",
+    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "140K",
+      "140,000"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_dataset_1b",
+    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "140K",
+      "140,000"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_layers_1a",
+    "question": "How many separated layers did the layer ablation study identify as optimal?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_layers_1b",
+    "question": "How many separated layers did the layer ablation study identify as optimal?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_authors_1a",
+    "question": "Who are the authors of this paper?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Zhenyu Liu",
+      "Yunxin Li",
+      "Baotian Hu"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run FIRST. Expect cache MISS, full pipeline latency (~cold, e.g. ~28s).",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_exact_authors_1b",
+    "question": "Who are the authors of this paper?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Zhenyu Liu",
+      "Yunxin Li",
+      "Baotian Hu"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: identical question, run SECOND (immediately after 1a, same user_id, within TTL). Expect [CACHE HIT] log line and near-instant (~2s) response, identical to 1a's answer.",
+    "cache_test": "exact_repeat"
+  },
+  {
+    "id": "cache_neardup_gpu_a",
+    "question": "How many NVIDIA GPUs were used to train Lychee-FD, and which model?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "8",
+      "H20"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_gpu_b",
+    "question": "Which GPU model, and how many, was used for training Lychee-FD?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "8",
+      "H20"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_encoder_a",
+    "question": "What audio encoder does Lychee-FD use for processing input audio?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Whisper-v3-large"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_encoder_b",
+    "question": "Which encoder handles input audio in Lychee-FD?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "Whisper-v3-large"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_dataset_a",
+    "question": "Approximately how many full-duplex dialogue instances are in Lychee-FD's final training dataset?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "140K",
+      "140,000"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_dataset_b",
+    "question": "Roughly how many dialogue instances make up the final training set?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "140K",
+      "140,000"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_utmos_a",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_utmos_b",
+    "question": "What was Lychee-FD's UTMOS speech quality score?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_optimizer_a",
+    "question": "What optimizer and learning rate were used to train Lychee-FD?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "AdamW",
+      "3e-6"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_optimizer_b",
+    "question": "Which optimizer, and what learning rate, did the authors use?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "AdamW",
+      "3e-6"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_layers_a",
+    "question": "How many separated layers did the layer ablation study identify as optimal?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: original phrasing. Expect cache MISS (first time asked).",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_neardup_layers_b",
+    "question": "According to the layer ablation, what's the optimal number of separated layers?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache test: reworded version of the paired _a question, same fact. Because QueryCache._hash_query does an exact lowercased string hash (no semantic matching), expect this to ALSO be a cache MISS despite meaning the same thing as its pair -- this is the gap worth demonstrating.",
+    "cache_test": "near_duplicate"
+  },
+  {
+    "id": "cache_staleness_utmos_1",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache staleness test, step 1 of 3: run this BEFORE any re-ingest/update of the document. Populates the cache.",
+    "cache_test": "staleness_check"
+  },
+  {
+    "id": "cache_staleness_utmos_2",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache staleness test, step 2 of 3: run this AFTER re-ingesting/re-uploading the same document (simulating a content update), same user_id, still within the 1hr TTL. If the system returns the OLD cached answer without re-checking freshness, that's the staleness gap -- there's no cache invalidation hook on document re-ingest in QueryCache.",
+    "cache_test": "staleness_check"
+  },
+  {
+    "id": "cache_staleness_utmos_3",
+    "question": "What UTMOS score did Lychee-FD achieve for speech synthesis quality?",
+    "type": "answer",
+    "expected_answer_contains": [
+      "4.50"
+    ],
+    "document_id": "6a549f0f62642be451689205",
+    "note": "Cache staleness test, step 3 of 3: run this AFTER manually calling query_cache.clear(). Expect a cache MISS and a fresh pipeline run, confirming clear() is the only current invalidation path (no automatic invalidation on re-ingest).",
+    "cache_test": "staleness_check"
   }
 ]
