@@ -56,6 +56,20 @@ def _build_pipeline_options() -> PdfPipelineOptions:
     options = PdfPipelineOptions()
 
     if settings.ENABLE_PICTURE_DESCRIPTION:
+        # 2026-07-15 fix: Docling has its OWN separate safety gate for any
+        # remote call a pipeline step might make -- setting
+        # do_picture_description=True alone is not enough. Confirmed
+        # directly: every single page failed conversion with "Connections
+        # to remote services is only allowed when set explicitly.
+        # pipeline_options.enable_remote_services=True.", which meant the
+        # WHOLE document (not just figures) fell back to plain PyMuPDF
+        # text extraction -- losing table structure and section
+        # boundaries too, not just figure descriptions. This flag must be
+        # set explicitly even though moondream is running locally --
+        # Docling doesn't distinguish "local" from "remote" here, it just
+        # sees an HTTP call leaving the process.
+        options.enable_remote_services = True
+
         # generate_picture_images=True: the picture-description model needs
         # an actual rendered image to look at, not just the page's parsed
         # layout structure -- this is what makes that image available to it.

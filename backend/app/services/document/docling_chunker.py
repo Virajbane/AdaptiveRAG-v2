@@ -4,24 +4,36 @@ docling_chunker.py
 Structure-aware chunker built on Docling's parsed document, replacing
 the regex-based table/section handling in chunker.py for PDFs.
 
-Two problems this fixes (found via eval_rag.py root-cause analysis,
-2026-07-09):
+Three problems this fixes (found via eval_rag.py root-cause analysis):
 
-1. Table fragmentation: the old chunker split dense numeric tables by
-   token count alone, producing bare number streams with no column
-   labels (e.g. "39.4" with no indication it's TriviaQA S->S accuracy).
-   Docling's TableFormer model gives us real row/column structure, so
-   here each table row is serialized as "column_name=value" pairs --
-   the number and its label can never be separated by a chunk boundary
-   again.
+1. Table fragmentation (2026-07-09): the old chunker split dense numeric
+   tables by token count alone, producing bare number streams with no
+   column labels (e.g. "39.4" with no indication it's TriviaQA S->S
+   accuracy). Docling's TableFormer model gives us real row/column
+   structure, so here each table row is serialized as "column_name=value"
+   pairs -- the number and its label can never be separated by a chunk
+   boundary again.
 
-2. Section-boundary bleeding: the old token-based splitter would
-   happily stitch the tail of one section to the head of the next
+2. Section-boundary bleeding (2026-07-09): the old token-based splitter
+   would happily stitch the tail of one section to the head of the next
    (confirmed: a chunk mixing "backchannel injection" content with the
    start of "4.3 Implementation Details" diluted the embedding enough
    to drop a directly-relevant chunk out of the top-20 vector search
    results). This chunker treats every section_header as a hard
    boundary -- prose is only merged within a section, never across.
+
+3. Figure/chart content silently dropped (2026-07-14, Bug 3): PICTURE
+   items had no branch here at all -- they fell through to the generic
+   `text = getattr(item, "text", "")` path, which is empty for an image,
+   so they hit the `if not text: continue` guard and were dropped
+   entirely. Confirmed via diagnostic: a UTMOS chart value never
+   appeared in ANY retrieved candidate, in any form -- not a ranking
+   problem, the number was never captured into a chunk at all. Fixed by
+   adding a PICTURE branch below that pulls the VLM-generated
+   description (see docling_parser.py's do_picture_description /
+   PictureDescriptionApiOptions config) and chunks it the same way a
+   table row is chunked -- anchored to its section heading so it's
+   retrievable the same way.
 """
 
 from typing import List, Optional
@@ -79,6 +91,13 @@ class DoclingChunker:
                 result.extend(table_chunks)
                 continue
 
+            if label_str == "DocItemLabel.PICTURE" or label_str == "picture":
+                flush_prose()
+                picture_chunk = self._chunk_picture(item, current_heading)
+                if picture_chunk:
+                    result.append(picture_chunk)
+                continue
+
             text = getattr(item, "text", "")
             if not text or not text.strip():
                 continue
@@ -94,6 +113,52 @@ class DoclingChunker:
 
         flush_prose()
         return result
+
+    def _chunk_picture(self, picture_item, heading: str) -> Optional[dict]:
+        """
+        Turns a figure's VLM-generated description (produced during
+        parsing -- see docling_parser.py's do_picture_description config)
+        into a real, retrievable chunk. Without this, PICTURE items have
+        no text at all and were previously silently dropped.
+
+        ASSUMPTION TO VERIFY: picture_item.annotations is assumed to be a
+        list of annotation objects, where a PictureDescriptionData-style
+        annotation exposes its generated text via a `.text` attribute.
+        Exact attribute name can differ by docling version -- if this
+        comes back empty even though do_picture_description is enabled
+        and Ollama logs show the vision model actually being called,
+        paste the picture_item's actual attributes/annotations structure
+        and this gets corrected against your real installed version.
+
+        Returns None (produces no chunk) if do_picture_description was
+        disabled or the description came back empty -- same "don't
+        silently fabricate content" principle as the rest of the
+        pipeline; a figure with no description is better logged/skipped
+        than chunked as an empty string.
+        """
+        description_text = ""
+        annotations = getattr(picture_item, "annotations", None) or []
+        for annotation in annotations:
+            candidate = getattr(annotation, "text", None)
+            if candidate:
+                description_text = candidate.strip()
+                break
+
+        if not description_text:
+            return None
+
+        caption = ""
+        try:
+            texts = getattr(picture_item, "captions", None) or []
+            caption = " ".join(getattr(c, "text", "") for c in texts if hasattr(c, "text"))
+        except Exception:
+            pass
+
+        header_line = f"[Section: {heading}]" if heading else ""
+        caption_line = f"Figure: {caption}" if caption else "Figure:"
+        text = "\n".join(filter(None, [header_line, caption_line, description_text]))
+
+        return {"text": text, "tokens": self.count_tokens(text)}
 
     def _chunk_table(self, table_item, doc, heading: str) -> List[dict]:
         """
