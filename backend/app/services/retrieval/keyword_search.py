@@ -23,6 +23,20 @@ class KeywordSearchEngine:
                 'text': chunk['text']
             })
 
+        # FIX (2026-07-14) -- BM25Plus computes avg doc length internally
+        # as sum(doc_lengths) / len(corpus); called with an EMPTY corpus
+        # (e.g. removing a user's last remaining document leaves
+        # self.user_chunks[user_id] == []) that's a division by zero.
+        # Guard here, in the one place every caller (index_document,
+        # remove_document, rebuild_from_chunks) already funnels through,
+        # rather than patching each call site separately. self.bm25
+        # stays None, which search() already checks for and handles by
+        # returning [] -- correct behavior for "this user has no
+        # indexed documents right now."
+        if not tokenized_chunks:
+            self.bm25 = None
+            return
+
         self.bm25 = BM25Plus(tokenized_chunks)
 
     def search(self, query: str, top_k: int = 10, document_id: Optional[str] = None) -> List[dict]:
@@ -96,6 +110,13 @@ class KeywordSearchManager:
       by a document-delete endpoint, so it can keep BM25 in sync with
       Qdrant (QdrantVectorDB.delete_document_vectors) and Mongo instead
       of leaving orphaned chunks behind on deletion too.
+
+    2026-07-14 fix — empty-corpus division by zero:
+      remove_document() (and, in principle, index_document()) can leave
+      user_chunks[user_id] == [] once a user's LAST remaining document
+      is removed. Rebuilding BM25Plus on an empty corpus divides by
+      zero internally (avg doc length = sum/len(corpus)). Fixed at the
+      source in KeywordSearchEngine.build_index() -- see comment there.
     """
 
     def __init__(self):
@@ -136,6 +157,10 @@ class KeywordSearchManager:
         in hybrid search results and resolve to "Unknown document" once
         their filename lookup fails, exactly like the accumulation bug
         above.
+
+        Safe to call when this removes the user's LAST remaining
+        document -- build_index() handles the resulting empty corpus
+        without dividing by zero (see 2026-07-14 fix note above).
         """
         if user_id not in self.user_chunks:
             return

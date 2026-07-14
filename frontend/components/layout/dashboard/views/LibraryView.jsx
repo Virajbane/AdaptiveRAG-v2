@@ -3,6 +3,15 @@
 // Library view: upload dropzone + documents list with delete.
 // All document-specific state and API logic lives here — if uploads or
 // deletes break, this is the only file you need to touch/paste.
+//
+// MULTI-FILE FIX (2026-07-14): previously the <input> had no `multiple`
+// attribute (so the OS picker dialog itself wouldn't allow selecting more
+// than one file), and both onDrop and onChange hardcoded files[0],
+// discarding every other file even when multiple were dropped at once.
+// handleUpload now accepts a FileList/array and uploads every file in it
+// in parallel (each gets its own doc_id/background task server-side,
+// same as the single-file endpoint always assumed), then refreshes the
+// document list ONCE at the end instead of once per file.
 
 import { useState, useRef, useEffect } from 'react';
 import { S } from '../styles';
@@ -41,19 +50,45 @@ export default function LibraryView({ token, onDocumentsChange }) {
   // sidebar "Workspace Docs" shortcuts and the chat "Searching N files" text.
   useEffect(() => { onDocumentsChange?.(documents); }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleUpload = async (file) => {
-    if (!file) return;
-    setUploading(true);
+  // Uploads a single file. Returns { ok, filename, message? } instead of
+  // throwing, so one bad file in a batch doesn't abort the rest.
+  const uploadOne = async (file) => {
     try {
       const fd = new FormData();
       fd.append('file', file);
       const res = await fetch(`${API_URL}/api/v1/documents/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-      if (!res.ok) throw new Error('Upload failed');
-      await fetchDocuments();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { ok: false, filename: file.name, message: data.detail || 'Upload failed' };
+      }
+      return { ok: true, filename: file.name };
     } catch (err) {
-      setError(err.message);
+      return { ok: false, filename: file.name, message: err.message || 'Upload failed' };
+    }
+  };
+
+  // Accepts a FileList or array of File objects -- one or many. Uploads
+  // all of them in parallel, then refreshes the document list once.
+  const handleUpload = async (fileListOrArray) => {
+    const files = Array.from(fileListOrArray || []).filter(Boolean);
+    if (files.length === 0) return;
+
+    setUploading(true);
+    setError('');
+    try {
+      const results = await Promise.all(files.map(uploadOne));
+      const failures = results.filter(r => !r.ok);
+      if (failures.length > 0) {
+        const summary = failures.map(f => `${f.filename}: ${f.message}`).join('; ');
+        setError(
+          failures.length === files.length
+            ? `All uploads failed — ${summary}`
+            : `${failures.length} of ${files.length} uploads failed — ${summary}`
+        );
+      }
     } finally {
       setUploading(false);
+      await fetchDocuments();
     }
   };
 
@@ -85,14 +120,24 @@ export default function LibraryView({ token, onDocumentsChange }) {
           onClick={() => fileInputRef.current?.click()}
           onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#1ed760'; }}
           onDragLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
-          onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+          onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; if (e.dataTransfer.files.length > 0) handleUpload(e.dataTransfer.files); }}
         >
-          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.docx" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) handleUpload(e.target.files[0]); }} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.txt,.docx"
+            multiple
+            style={{ display: 'none' }}
+            onChange={e => {
+              if (e.target.files && e.target.files.length > 0) handleUpload(e.target.files);
+              e.target.value = ''; // allow re-selecting the same file(s) later
+            }}
+          />
           <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#1f1f1f', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1ed760" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
-          <p style={{ fontSize: 15, color: '#e5e2e1', marginBottom: 4 }}>{uploading ? 'Uploading…' : 'Drop a file here or click to upload'}</p>
-          <p style={{ fontSize: 12, color: '#b3b3b3' }}>Supports PDF, TXT, DOCX</p>
+          <p style={{ fontSize: 15, color: '#e5e2e1', marginBottom: 4 }}>{uploading ? 'Uploading…' : 'Drop files here or click to upload'}</p>
+          <p style={{ fontSize: 12, color: '#b3b3b3' }}>Supports PDF, TXT, DOCX — multiple files allowed</p>
         </div>
 
         {/* Header row */}
@@ -102,7 +147,7 @@ export default function LibraryView({ token, onDocumentsChange }) {
         </div>
 
         {loading && <p style={{ color: '#b3b3b3', fontSize: 14 }}>Loading…</p>}
-        {error && <p style={{ color: '#f3727f', fontSize: 14 }}>{error}</p>}
+        {error && <p style={{ color: '#f3727f', fontSize: 14, whiteSpace: 'pre-wrap' }}>{error}</p>}
 
         {!loading && documents.length === 0 && (
           <div style={{ ...S.card, padding: 48, textAlign: 'center' }}>

@@ -4,7 +4,104 @@ from app.services.retrieval.hybrid_search import HybridSearchEngine
 from app.services.retrieval.document_resolver import resolve_document_filter
 from bson import ObjectId
 from bson.errors import InvalidId
+import re
 import time
+
+# 2026-07-14 fix: production top_k was a flat 5 for every question, and
+# that 5 was ALSO what got shown straight to the LLM. Confirmed via
+# eval_rag.py --top-k 12 probe: two known-good chunks
+# (retrieval_table_llamaq_st_1, retrieval_table_webq_ss_1) were sitting
+# at rank 9 and rank 7 -- correctly ranked, just outside a 5-wide window.
+# Table/figure-metric questions are the ones at risk here: they compete
+# against many similar-looking numeric rows for the same benchmark, so
+# the right one sometimes lands just past the cutoff. Prose questions
+# (~92%+ recall) don't have this problem.
+#
+# Naive fix (raise top_k to 12 for everyone, pass all 12 to the LLM) was
+# rejected: more context isn't free. Larger contexts risk (a) "lost in
+# the middle" -- the model paying less attention to chunks buried in a
+# long context even when they're present, and (b) worse cross-entity
+# confusion, i.e. exactly the class of bug already fixed in §2.2 (the
+# UTMOS entity-attribution fabrication), which gets MORE likely, not
+# less, if the model has more similar-looking numbers in front of it at
+# once.
+#
+# Fix instead: search wide, answer narrow. For metric-style questions,
+# pull a bigger CANDIDATE pool (12) from the search engine, but only
+# forward the top FINAL_CONTEXT_SIZE of those (reranked) to
+# state.retrieved_docs -- the same size context the LLM always saw.
+# This works because HybridSearchEngine already reranks every candidate
+# it returns (see rerank_score below) -- we're just giving the reranker
+# a wider pool to choose the best 5 from, not asking the LLM to read
+# more.
+# 2026-07-14 fix, part 3: diagnostic on retrieval_prose_backchannel_prob_1
+# showed the correct chunk (Sec 11.2, "User Backchannels: ...") sitting at
+# rank 7 -- same ranking-window bug as the table/figure cases above, just
+# for a question phrased with "probability" instead of "accuracy/score/
+# rate", which the original keyword list didn't cover. Confirmed the
+# question was never classified as metric-style at all (query type:
+# default, candidates searched: 5), so no widening ever triggered.
+# Widening the trigger list rather than trying to enumerate every
+# possible numeric-value phrasing exhaustively -- same tradeoff as
+# before: heuristic and inspectable, not exhaustive.
+_METRIC_KEYWORDS = re.compile(
+    r"\b(accuracy|score|rate|gflops?|utmos|wer|srr|sir|tor|mrr|"
+    r"probability|percentage|ratio|threshold|"
+    r"table\s*\d|figure\s*\d)\b",
+    re.IGNORECASE,
+)
+
+DEFAULT_CANDIDATE_K = 5    # unchanged behavior for ordinary prose questions
+METRIC_CANDIDATE_K = 12    # wider net for table/figure-metric questions --
+                            # matches the value confirmed to surface both
+                            # known ranking-window misses in the eval probe
+FINAL_CONTEXT_SIZE = 5     # what actually reaches the LLM, regardless of
+                            # how wide the candidate search was. Keeps
+                            # context size (and confusion risk) constant.
+
+
+def _is_metric_style_query(question: str) -> bool:
+    """True if the question is asking for a specific numeric metric value
+    (accuracy/score/rate/etc, often tied to a benchmark table or figure).
+    These compete against many visually/textually similar numeric rows,
+    so they benefit from a wider CANDIDATE search -- but not a wider
+    final context; see FINAL_CONTEXT_SIZE above."""
+    return bool(_METRIC_KEYWORDS.search(question))
+
+
+# 2026-07-14 fix, part 2: diagnostic (test_retriever_patch.py, full
+# 12-candidate dump) showed the correct chunk WAS being retrieved for
+# both llamaq_st_1 and webq_ss_1 -- it just scored far below prose
+# chunks that merely *mention* the table narratively. Confirmed directly:
+#   score=0.5385 | Row [Lychee-FD (Ours) w/o Sem -]: ...LlamaQ.S->T=73.7...
+#   score=0.9978 | [Section 4.4] Result. As presented in Table...
+# The reranker (trained on natural language) systematically underrates
+# the stiff "Row [X]: Field=value, Field=value" chunk format compared to
+# ordinary prose that just talks ABOUT the table -- so table-row chunks
+# get crowded out of the final narrowing even when they're the single
+# chunk that actually contains the number asked for.
+#
+# This is a stopgap: it guarantees any retrieved table-row chunk survives
+# into the final context for metric-style questions, regardless of its
+# rerank score. The real fix is upstream (rewrite table rows into natural
+# sentences at ingestion time so the reranker judges them fairly) -- this
+# patch just stops the current row-chunk format from being penalized
+# until that ingestion-side fix lands.
+_TABLE_ROW_PATTERN = re.compile(r"^\s*Row\s*\[", re.IGNORECASE)
+
+
+def _is_table_row_chunk(doc: dict) -> bool:
+    return bool(_TABLE_ROW_PATTERN.match(doc.get("text", "")))
+
+
+def _rerank_key(doc: dict) -> float:
+    """Sort key for narrowing candidates back down. Prefers rerank_score
+    (the BGE cross-encoder score, which is what actually determines real
+    ranking quality) and falls back to combined_score (RRF fusion score)
+    only if reranking didn't run -- same precedence already used by the
+    debug-logging block below, kept consistent here."""
+    return doc.get("rerank_score", doc.get("combined_score", 0.0))
+
 
 class RetrieverAgent(BaseAgent):
     """
@@ -75,13 +172,41 @@ class RetrieverAgent(BaseAgent):
 
             document_id = await resolve_document_filter(question, state.user_id, self.db)
 
+            is_metric_query = _is_metric_style_query(question)
+            candidate_k = METRIC_CANDIDATE_K if is_metric_query else DEFAULT_CANDIDATE_K
+
             search_engine = HybridSearchEngine()
-            results = await search_engine.search(
+            candidates = await search_engine.search(
                 query=question,
                 user_id=state.user_id,
-                top_k=5,
+                top_k=candidate_k,
                 document_id=document_id,
             )
+
+            # Narrow back down to a constant-size final context. For
+            # ordinary prose questions candidate_k == FINAL_CONTEXT_SIZE
+            # already, so this is a no-op slice.
+            #
+            # For metric-style questions: table-row chunks are guaranteed
+            # a spot regardless of rerank score (see _is_table_row_chunk
+            # note above -- confirmed via direct diagnostic that the
+            # reranker underrates this chunk format even when it's the
+            # one chunk with the actual answer). Remaining slots are
+            # filled by rerank score as before.
+            if is_metric_query and len(candidates) > FINAL_CONTEXT_SIZE:
+                row_chunks = [c for c in candidates if _is_table_row_chunk(c)]
+                other_chunks = sorted(
+                    (c for c in candidates if not _is_table_row_chunk(c)),
+                    key=_rerank_key, reverse=True,
+                )
+                remaining_slots = max(FINAL_CONTEXT_SIZE - len(row_chunks), 0)
+                results = row_chunks + other_chunks[:remaining_slots]
+                # Preserve overall rerank ordering in the final list so
+                # downstream consumers that assume results[0] is "best"
+                # still see something reasonable at the top.
+                results = sorted(results, key=_rerank_key, reverse=True)
+            else:
+                results = candidates
 
             await self._attach_filenames(results)
 
@@ -89,6 +214,10 @@ class RetrieverAgent(BaseAgent):
             state.search_time_ms = (time.time() - start_time) * 1000
 
             print(f"[RETRIEVER] document_id filter: {document_id}")
+            print(
+                f"[RETRIEVER] query type: {'metric-style' if is_metric_query else 'default'} "
+                f"| candidates searched: {candidate_k} | forwarded to LLM: {len(results)}"
+            )
             print(f"[RETRIEVER] Found {len(results)} documents")
             for i, doc in enumerate(results, 1):
                 # rerank_score is the BGE cross-encoder score and is what

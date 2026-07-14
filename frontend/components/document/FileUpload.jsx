@@ -9,84 +9,128 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 // This component shows a drag-and-drop box for uploading files.
 // It calls onUploadSuccess() when the upload finishes, so the parent
 // page knows to refresh its document list.
+//
+// MULTI-FILE FIX (2026-07-14): previously both handleFileSelect and
+// handleDrop only ever read files[0], discarding every other selected
+// file -- and the <input> lacked the `multiple` attribute, so the OS
+// picker dialog wouldn't even let you select more than one to begin
+// with. The backend's /upload endpoint is intentionally single-file
+// per request (one doc_id, one background task, one status-poll
+// target per document) -- so the fix here is to keep that endpoint
+// as-is and just fire one request per selected file from the
+// frontend, tracked as a batch.
 export function FileUpload({ onUploadSuccess }) {
-  const { token } = useAuth(); // JWT token from login, needed to prove who we are
+  const { token } = useAuth();
 
-  // Plain useState, no type annotations needed in JS
-  const [isDragging, setIsDragging] = useState(false);   // true while user drags a file over the box
-  const [isUploading, setIsUploading] = useState(false); // true while upload is in progress
-  const [error, setError] = useState('');                // holds any error message to show
-  const [progress, setProgress] = useState(0);            // fake progress bar (0-100)
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [stage, setStage] = useState('idle'); // 'idle' | 'uploading' | 'queued'
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
-  // Called continuously while a file is being dragged over the drop zone
   const handleDragOver = (e) => {
-    e.preventDefault(); // stops the browser from opening the file directly
+    e.preventDefault();
     setIsDragging(true);
   };
 
-  // Called when the dragged file leaves the drop zone without being dropped
   const handleDragLeave = () => {
     setIsDragging(false);
   };
 
-  // The actual upload logic - sends the file to our FastAPI backend
-  const uploadFile = async (file) => {
-    setError('');
-    setIsUploading(true);
-    setProgress(0);
-
+  // Uploads a single file. Returns { ok: true } or { ok: false, filename, message }
+  // rather than throwing, so one failed file in a batch doesn't abort
+  // the rest of the batch.
+  const uploadOne = async (file) => {
     try {
-      // FormData is the standard way browsers send files over HTTP
       const formData = new FormData();
       formData.append('file', file);
 
       const response = await fetch(`${API_URL}/api/v1/documents/upload`, {
         method: 'POST',
         headers: {
-          // Note: we do NOT set Content-Type here.
-          // The browser sets it automatically for FormData (multipart/form-data)
           Authorization: `Bearer ${token}`,
         },
         body: formData,
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Upload failed');
+        const data = await response.json().catch(() => ({}));
+        return { ok: false, filename: file.name, message: data.detail || 'Upload failed' };
       }
 
-      const data = await response.json();
-      setProgress(100);
-
-      // Wait a moment so the user sees "100%" before we reset the UI
-      setTimeout(() => {
-        setIsUploading(false);
-        onUploadSuccess(); // tell the parent page to refresh the document list
-      }, 1000);
+      await response.json();
+      return { ok: true, filename: file.name };
     } catch (err) {
-      // err.message works the same in JS as TS, we just don't need "instanceof Error" checks
-      setError(err.message || 'Upload failed');
-      setIsUploading(false);
+      return { ok: false, filename: file.name, message: err.message || 'Upload failed' };
     }
   };
 
-  // Called when user drops a file onto the box
+  const uploadFiles = async (fileList) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+
+    setError('');
+    setIsUploading(true);
+    setStage('uploading');
+    setProgress({ done: 0, total: files.length });
+
+    // Fire uploads in parallel -- each gets its own doc_id and
+    // background task server-side, so there's no reason to serialize
+    // the HTTP requests themselves (only the same-filename-collision
+    // edge case below is a caveat, not a reason to serialize).
+    const results = await Promise.all(
+      files.map(async (file) => {
+        const result = await uploadOne(file);
+        setProgress((prev) => ({ ...prev, done: prev.done + 1 }));
+        return result;
+      })
+    );
+
+    const failures = results.filter((r) => !r.ok);
+    if (failures.length > 0) {
+      const summary = failures
+        .map((f) => `${f.filename}: ${f.message}`)
+        .join('; ');
+      setError(
+        failures.length === files.length
+          ? `All uploads failed — ${summary}`
+          : `${failures.length} of ${files.length} uploads failed — ${summary}`
+      );
+    }
+
+    setStage('queued');
+
+    // Let the user see the "queued" state briefly, then hand control
+    // back to the documents list -- which now polls on its own and
+    // will show "processing" -> "processed"/"processed_with_gaps"/
+    // "failed" as those states actually happen, live, for every file
+    // in this batch.
+    setTimeout(() => {
+      setIsUploading(false);
+      setStage('idle');
+      setProgress({ done: 0, total: 0 });
+      onUploadSuccess();
+    }, 1200);
+  };
+
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      uploadFile(files[0]); // we only handle the first file
+      uploadFiles(files);
     }
   };
 
-  // Called when user clicks the box and picks a file via the OS file picker
   const handleFileSelect = (e) => {
     const files = e.currentTarget.files;
     if (files && files.length > 0) {
-      uploadFile(files[0]);
+      uploadFiles(files);
     }
+    // Reset so selecting the SAME file(s) again later still fires
+    // onChange -- browsers don't fire change if the value is identical
+    // to last time.
+    e.currentTarget.value = '';
   };
 
   return (
@@ -95,46 +139,57 @@ export function FileUpload({ onUploadSuccess }) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`border-2 border-dashed rounded-lg p-8 text-center transition ${
-        isDragging
-          ? 'border-blue-500 bg-blue-50'
-          : 'border-gray-300 bg-gray-50'
+        isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50'
       } ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
     >
-      {/* Hidden native file input - the visible UI is the label below */}
       <input
         type="file"
         id="file-input"
         onChange={handleFileSelect}
         accept=".pdf,.docx,.txt,.csv"
+        multiple
         className="hidden"
         disabled={isUploading}
       />
 
       {!isUploading ? (
-        // Default state: prompt to drag or click
         <label htmlFor="file-input" className="cursor-pointer">
           <div className="text-4xl mb-2">📄</div>
           <p className="text-lg font-semibold text-gray-900">
-            Drag and drop your file here
+            Drag and drop your files here
           </p>
           <p className="text-sm text-gray-500 mt-2">
-            or click to select (PDF, DOCX, TXT, CSV up to 50MB)
+            or click to select (PDF, DOCX, TXT, CSV up to 50MB each — multiple files allowed)
           </p>
         </label>
       ) : (
-        // Uploading state: show a progress bar
         <div>
-          <p className="text-lg font-semibold mb-4">Uploading...</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className="bg-blue-600 h-2 rounded-full transition-all"
-              style={{ width: `${progress}%` }}
-            />
+          <p className="text-lg font-semibold mb-2">
+            {stage === 'uploading'
+              ? progress.total > 1
+                ? `Uploading files… (${progress.done}/${progress.total})`
+                : 'Uploading file…'
+              : progress.total > 1
+              ? `${progress.total} files uploaded — processing started`
+              : 'Uploaded — processing started'}
+          </p>
+          <p className="text-sm text-gray-500">
+            {stage === 'uploading'
+              ? 'Sending your file(s) to the server.'
+              : "Chunking and embedding now. You'll see live status below once this closes."}
+          </p>
+          {/* Indeterminate bar, not a fake percentage -- there's no
+              meaningful "% done" to show at the upload step, since
+              real progress (chunking/embedding) hasn't started yet
+              and happens server-side, tracked by the documents list's
+              polling instead. */}
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 overflow-hidden">
+            <div className="h-2 rounded-full bg-blue-600 animate-pulse w-full" />
           </div>
         </div>
       )}
 
-      {error && <p className="text-red-600 text-sm mt-4">{error}</p>}
+      {error && <p className="text-red-600 text-sm mt-4 whitespace-pre-wrap">{error}</p>}
     </div>
   );
 }

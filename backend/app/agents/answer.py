@@ -3,14 +3,96 @@ from app.agents.state import AgentState
 from app.agents.prompts import ANSWER_PROMPT
 import re
 
-def _numeric_claims_grounded(answer: str, context: str) -> bool:
+
+def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     """If a number in the answer never appears anywhere in the context
     actually handed to the LLM, it didn't come from that context --
-    it's either training-data recall or invention."""
+    it's either training-data recall or invention.
+
+    2026-07-14 fix: the original version only checked substring presence
+    of the number anywhere in context ("num in context"). That's too
+    weak -- it can't tell WHICH entity a number is attached to. Confirmed
+    root cause of the UTMOS eval failures (answer_utmos_freezeomni_1,
+    answer_utmos_moshi_1): both wrong answers reused "4.50" -- which IS
+    present in context (it's Lychee-FD's own score sitting a few lines
+    away) -- so the old check passed even though "4.50" was never
+    actually paired with "Freeze-Omni" or "Moshi" anywhere in the
+    source text. The guard was checking existence, not attribution.
+
+    Fix: split context into line/sentence-level spans, and require that
+    for each number in the answer, at least one context span contains
+    BOTH that number AND an entity mentioned in the question. This is a
+    crude string-proximity check (not real entity linking/NER), but it
+    directly catches the observed failure mode: a number that's real but
+    borrowed from a different entity's row/sentence.
+
+    If the question doesn't contain any capitalized entity-like tokens
+    (e.g. a purely conceptual question with no named entity), we fall
+    back to the original "does the number appear anywhere" check, since
+    there's no entity to anchor against.
+    """
     numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
     if not numbers_in_answer:
         return True
-    return all(num in context for num in numbers_in_answer)
+
+    # crude entity extraction: capitalized multi-char tokens from the
+    # question (catches things like "Freeze-Omni", "Moshi", "Lychee-FD",
+    # "Table 1"). Not real NER, but cheap and matches the report's
+    # observed failure cases. Filter out common sentence-initial question
+    # words that get capitalized purely by position, not because they're
+    # proper nouns -- otherwise a plain question like "How many layers
+    # does the model use?" gets "How" treated as an entity, and since
+    # "how" never appears in context, every number in the answer would
+    # be wrongly declined.
+    _QUESTION_STOPWORDS = {
+        "how", "what", "which", "who", "whom", "when", "where", "why",
+        "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
+    }
+    entities = [
+        e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
+        if e.lower() not in _QUESTION_STOPWORDS
+    ]
+
+    if not entities:
+        # No named entity to anchor against -- fall back to the
+        # original, weaker existence check rather than false-declining
+        # every number-containing answer to a non-comparison question.
+        return all(num in context for num in numbers_in_answer)
+
+    # Split context into sentence/line-level spans so we can check
+    # whether a number and an entity actually co-occur in the SAME
+    # span, rather than just both existing somewhere in the whole blob.
+    # Split on '.' only when NOT between two digits, so decimal numbers
+    # like "4.21" don't get fractured into separate spans.
+    context_spans = re.split(r"(?<!\d)\.(?!\d)|\n", context)
+
+    # Drop entities that appear in EVERY numbered span (e.g. a metric
+    # name like "UTMOS" mentioned in every row, or a "[Source N]" label
+    # digit that isn't a real fact). Those don't discriminate between
+    # rows, so matching against them defeats the point of the check --
+    # keep only entities that appear in a strict subset of spans, i.e.
+    # ones that actually distinguish which row a number belongs to.
+    spans_with_numbers = [
+        s for s in context_spans
+        if re.search(r"\d", s) and not re.match(r"^\s*\[.*\]\s*$", s)
+    ]
+    discriminating = [
+        e for e in entities
+        if 0 < sum(1 for s in spans_with_numbers if e.lower() in s.lower()) < len(spans_with_numbers)
+    ]
+    entities = discriminating or entities
+
+    for num in numbers_in_answer:
+        num_and_entity_cooccur = any(
+            num in span and any(e.lower() in span.lower() for e in entities)
+            for span in context_spans
+        )
+        if not num_and_entity_cooccur:
+            return False
+
+    return True
+
+
 class AnswerAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
 
@@ -113,10 +195,18 @@ class AnswerAgent(BaseAgent):
             response = await self.call_llm(prompt)
             state.answer = response.strip()
 
-            declined_on_ungrounded_number = not _numeric_claims_grounded(state.answer, context)
+            # 2026-07-14 fix: pass state.question through so the grounding
+            # check can anchor numbers to the entity actually being asked
+            # about, not just check raw existence anywhere in context.
+            # See _numeric_claims_grounded docstring for the UTMOS
+            # entity-attribution bug this closes.
+            declined_on_ungrounded_number = not _numeric_claims_grounded(
+                state.answer, context, state.question
+            )
             if declined_on_ungrounded_number:
                 print(
                     f"[ANSWER] Numeric claim not found verbatim in context "
+                    f"(or not attributed to the entity asked about) "
                     f"— declining rather than shipping unverified number. "
                     f"Original answer was: {state.answer!r}"
                 )
@@ -124,7 +214,8 @@ class AnswerAgent(BaseAgent):
                     "I found related content in the document, but couldn't verify "
                     "a specific number for this with confidence from the retrieved "
                     "text. This may be a figure or chart value that wasn't "
-                    "extracted as readable text."
+                    "extracted as readable text, or the number belongs to a "
+                    "different entity than the one asked about."
                 )
 
             # NOTE: sources built from top_docs (the docs actually sent to

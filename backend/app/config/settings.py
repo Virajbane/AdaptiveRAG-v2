@@ -28,6 +28,26 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     ENABLE_RERANKER: bool = True
 
+    # ==================== DOCUMENT PROCESSING ====================
+    # Pages per mini-PDF batch when parsing via Docling. Bounds Docling's
+    # peak memory per convert() call (~this many pages' worth of
+    # layout/table analysis at once) instead of scaling with total
+    # document size -- fixes std::bad_alloc on large/complex PDFs.
+    # Tune down (e.g. 3) on smaller/memory-constrained environments.
+    DOCLING_BATCH_SIZE: int = 5
+
+    # Vision model used by Docling's picture-description pass to transcribe
+    # chart/figure content (e.g. bar chart values) into searchable text.
+    # 2026-07-14 fix (Bug 3, figure-value extraction): figures were
+    # previously dropped entirely at chunking -- DoclingChunker had no
+    # branch for PICTURE items, and no description existed to chunk in the
+    # first place since do_picture_description was never enabled. Kept as
+    # a setting (not hardcoded) so it can be swapped without a code change
+    # if a given model proves too weak on dense charts (e.g. try
+    # "qwen2.5vl:3b" if "moondream" undershoots on the UTMOS bar chart).
+    ENABLE_PICTURE_DESCRIPTION: bool = True
+    PICTURE_DESCRIPTION_MODEL: str = "moondream"
+
     # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None

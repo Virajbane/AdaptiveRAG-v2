@@ -1,0 +1,75 @@
+[
+  {
+    "id": "retrieval_prose_userstyles_1",
+    "question": "How many distinct communication styles can the User Agent be sampled from in the data synthesis pipeline?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": ["19"],
+    "document_id": null,
+    "note": "Sec 11.1 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_prose_backchannel_prob_1",
+    "question": "What is the probability used for backchannel injection during post-processing in the data synthesis pipeline?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": ["0.5", "p=0.5", "p = 0.5"],
+    "document_id": null,
+    "note": "Sec 11.2 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_prose_interrupt_turns_1",
+    "question": "Between which conversation turns are random interruptions scheduled in the data synthesis pipeline?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": ["turns 2 and 4", "2 and 4"],
+    "document_id": null,
+    "note": "Sec 11.2 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_prose_motivations_1",
+    "question": "What are the five interruption motivations the User Agent can choose from?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": [
+      "Correction",
+      "Deeper Inquiry",
+      "Topic Shift",
+      "Strong Emotional Reaction",
+      "Impatience"
+    ],
+    "document_id": null,
+    "note": "Sec 11.2 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_prose_reviewer_dims_1",
+    "question": "Across what three dimensions does the Reviewer Agent score a synthesized dialogue?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": [
+      "Persona Consistency",
+      "Quality of Interruption Event",
+      "Naturalness of Backchannels"
+    ],
+    "document_id": null,
+    "note": "Sec 11.3 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_figure_gradient_1",
+    "question": "In the fully shared baseline, what is the gradient influence score of the text task on the speech task?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": ["-0.129"],
+    "document_id": null,
+    "note": "Figure 9, Sec 9 -- previously lost to the ingestion bug (pages 19-22)"
+  },
+  {
+    "id": "retrieval_figure_influence_hier_textspeech_1",
+    "question": "Under Lychee-FD's Hierarchical Parameter Separation, what is the influence score of text on speech?",
+    "type": "retrieval",
+    "expected_doc_id": "6a5686810620b3b99b1f6324",
+    "expected_answer_contains": ["0.205"],
+    "document_id": null,
+    "note": "Figure 9, Sec 9 -- previously lost to the ingestion bug (pages 19-22)"
+  }
+]

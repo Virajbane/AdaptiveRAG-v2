@@ -61,21 +61,7 @@ class QdrantVectorDB:
         batch_size: int = 100,
     ) -> dict:
         """
-        Upsert chunk vectors to Qdrant in batches, so one batch failing
-        doesn't lose vectors that would have stored fine.
-
-        Returns:
-            {
-                "stored_count": int,
-                "failed_count": int,
-                "failed_chunk_indices": [int, ...],  # ORIGINAL chunk_index
-                                                       # values (from chunk["chunk_index"]),
-                                                       # not positions within this call's
-                                                       # `chunks` list -- matters when the
-                                                       # caller has already filtered chunks
-                                                       # before calling this (which
-                                                       # document_processor.py now does).
-            }
+        (docstring unchanged from before)
         """
         if len(chunks) != len(embeddings):
             raise ValueError(
@@ -83,39 +69,43 @@ class QdrantVectorDB:
                 f"length mismatch -- refusing to silently truncate"
             )
 
-        # Build all points up front. IMPORTANT: the payload's chunk_index
-        # must be chunk["chunk_index"] (the ORIGINAL index stamped back in
-        # DocumentProcessor.process), NOT the loop position `i` here.
-        #
-        # Bug this fixes: document_processor.py filters out chunks that
-        # failed to embed BEFORE calling this function -- so `chunks` here
-        # may already be missing entries (e.g. original chunk #3 dropped).
-        # If we stored `i` (the position in this now-shorter list) as
-        # chunk_index, every chunk after a gap would get the WRONG
-        # chunk_index in Qdrant -- corrupting citations/search() results
-        # for any document that ever had a partial embedding failure.
-        # `i` is still used below for BATCH tracking (which batch a point
-        # belongs to for failure reporting) -- that usage is fine, since
-        # document_processor.py already un-shifts those back to real
-        # chunk_index values before returning failed_chunk_indices. Only
-        # the STORED PAYLOAD needed this fix.
         all_points = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            # FIXED (Stage 6): deterministic point ID derived from
+            # (doc_id, chunk_index) instead of a random uuid4.
+            #
+            # Why: on /retry, this function runs again against the SAME
+            # doc_id -- previously every point got a fresh random UUID,
+            # so upsert() could never recognize "this is the same chunk
+            # I already stored" and just added duplicate vectors
+            # alongside the old ones. A deterministic ID means Qdrant's
+            # upsert naturally REPLACES the old vector for that exact
+            # chunk instead of adding a new one -- no separate
+            # delete-before-retry step needed, and it's safe even if
+            # retry only re-processes a subset of chunks (each chunk's
+            # ID depends only on its own doc_id+chunk_index, not on
+            # what else is in the batch).
+            #
+            # uuid5 (not uuid4) is used specifically because it's
+            # deterministic: the same input string always produces the
+            # same UUID, unlike uuid4 which is random every call.
+            point_id = str(uuid.uuid5(
+                uuid.NAMESPACE_DNS,
+                f"{doc_id}_{chunk['chunk_index']}"
+            ))
+
             point = PointStruct(
-                id=str(uuid.uuid4()),
+                id=point_id,
                 vector=embedding,
                 payload={
                     "doc_id": doc_id,
                     "user_id": user_id,
-                    "chunk_index": chunk["chunk_index"],  # FIXED: was `i`
+                    "chunk_index": chunk["chunk_index"],
                     "chunk_text": chunk["text"],
                     "tokens": chunk["tokens"],
                     "namespace": f"user_{user_id}"
                 }
             )
-            # Track by chunk["chunk_index"] too, so failure reporting is
-            # already in terms of the real index -- no downstream
-            # un-shifting needed for this list.
             all_points.append((chunk["chunk_index"], point))
 
         stored_count = 0

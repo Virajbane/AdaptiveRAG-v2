@@ -25,6 +25,18 @@ ANSWER EVAL:
     still be fabricated. Reporting all three avoids the failure mode where
     a keyword match hides a real hallucination (see UTMOS eval history).
 
+    2026-07-14 fix: faithfulness now also runs a DETERMINISTIC
+    entity-attribution cross-check (_numeric_claims_entity_mismatches),
+    layered on top of the LLM judge rather than replacing it. Confirmed
+    directly: the local LLM judge scored BOTH confirmed UTMOS fabrications
+    (answer_utmos_freezeomni_1, answer_utmos_moshi_1) as faithfulness=1.0
+    -- a false negative on the two cases that mattered most, because the
+    judge (like a plain substring check) can only see that a number
+    appears SOMEWHERE in context, not whether it's attached to the right
+    entity. Same fix already applied to AnswerAgent's own numeric
+    fabrication guard; duplicated here (not imported) to keep this script
+    independently runnable per its zero-new-dependency design.
+
 Run:
     python eval_rag.py --golden golden_set.json --user-id <test_user_id>
 """
@@ -128,27 +140,126 @@ Instructions:
 """
 
 
-async def judge_faithfulness(llm, context: str, answer: str) -> tuple:
+_QUESTION_STOPWORDS = {
+    "how", "what", "which", "who", "whom", "when", "where", "why",
+    "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
+}
+
+
+def _numeric_claims_entity_mismatches(answer: str, context: str, question: str) -> List[str]:
+    """
+    Deterministic cross-check for entity-attribution fabrication (the
+    UTMOS bug: an answer reused a REAL number from context, but for the
+    WRONG entity -- e.g. "Freeze-Omni achieved 4.50" when 4.50 is
+    Lychee-FD's own score, not Freeze-Omni's). This is exactly the class
+    of error the LLM judge got wrong: it scored BOTH confirmed
+    fabrications as faithfulness=1.0, because "4.50" genuinely does
+    appear in the context -- neither the judge nor a plain substring
+    check can tell WHICH entity a number belongs to.
+
+    Same logic as AnswerAgent's _numeric_claims_grounded guard --
+    duplicated here (not imported) to keep this eval script
+    zero-new-dependency and independently runnable per its own docstring.
+    If these two implementations ever drift, this is the one to check
+    first.
+
+    Returns a list of number strings from `answer` that do NOT co-occur
+    with a discriminating entity from `question` in any single context
+    span. Empty list = no mismatch detected (either genuinely grounded,
+    or no named entity in the question to check against -- e.g. a plain
+    "how many layers" question, which this check deliberately sits out
+    of rather than false-flagging).
+    """
+    numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
+    if not numbers_in_answer:
+        return []
+
+    entities = [
+        e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
+        if e.lower() not in _QUESTION_STOPWORDS
+    ]
+    if not entities:
+        return []  # no entity to anchor against -- not this check's job
+
+    # Split on '.' only when NOT between two digits, so decimal numbers
+    # like "4.21" don't get fractured into separate spans.
+    context_spans = re.split(r"(?<!\d)\.(?!\d)|\n", context)
+
+    # Drop entities that appear in EVERY numbered span (e.g. a metric
+    # name like "UTMOS" mentioned in every row) -- those don't
+    # discriminate between rows, so matching against them defeats the
+    # point of the check.
+    spans_with_numbers = [
+        s for s in context_spans
+        if re.search(r"\d", s) and not re.match(r"^\s*\[.*\]\s*$", s)
+    ]
+    discriminating = [
+        e for e in entities
+        if 0 < sum(1 for s in spans_with_numbers if e.lower() in s.lower()) < len(spans_with_numbers)
+    ]
+    entities = discriminating or entities
+
+    mismatches = []
+    for num in numbers_in_answer:
+        cooccurs = any(
+            num in span and any(e.lower() in span.lower() for e in entities)
+            for span in context_spans
+        )
+        if not cooccurs:
+            mismatches.append(num)
+    return mismatches
+
+
+async def judge_faithfulness(llm, context: str, answer: str, question: str) -> tuple:
     """Uses your own LLMProvider.generate() as judge -- confirmed interface
-    match, no guessing needed here."""
+    match, no guessing needed here.
+
+    2026-07-14 fix: the LLM judge's verdict is no longer the only signal.
+    A deterministic entity-attribution check runs alongside it (see
+    _numeric_claims_entity_mismatches), because the LLM judge alone missed
+    both confirmed UTMOS fabrications (scored them faithfulness=1.0).
+    Entity mismatches are treated as high-confidence fabrication evidence
+    and hard-cap the score at 0.3, regardless of what the LLM judge said,
+    so a long otherwise-fine-sounding answer can't dilute a confirmed
+    mix-up into a near-passing score via the proportional formula below.
+    """
     prompt = FAITHFULNESS_JUDGE_PROMPT.format(context=context, answer=answer)
+
+    llm_call_failed = False
+    llm_claims: List[str] = []
     try:
         judge_response = await llm.generate(prompt)
+        text = judge_response.strip()
+        if not text.upper().startswith("NONE"):
+            llm_claims = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
+            llm_claims = [c for c in llm_claims if c]
     except Exception as e:
         print(f"[JUDGE] Faithfulness LLM call failed: {e}")
-        return None, []
+        llm_call_failed = True
 
-    text = judge_response.strip()
-    if text.upper().startswith("NONE"):
-        return 1.0, []
+    entity_mismatches = _numeric_claims_entity_mismatches(answer, context, question)
+    if entity_mismatches:
+        print(f"[JUDGE] Deterministic entity-attribution check flagged "
+              f"{len(entity_mismatches)} number(s) not attributed to the "
+              f"asked-about entity: {entity_mismatches}")
+    entity_claim_descs = [
+        f"the number {num} appears in context but is not attributed to "
+        f"the entity asked about (possible entity-attribution mix-up)"
+        for num in entity_mismatches
+    ]
+    claims = llm_claims + [c for c in entity_claim_descs if c not in llm_claims]
 
-    claims = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
-    claims = [c for c in claims if c]
     if not claims:
+        if llm_call_failed:
+            return None, []
         return 1.0, []
 
     approx_answer_sentences = max(answer.count(".") + answer.count("\n"), 1)
     score = max(0.0, 1 - len(claims) / approx_answer_sentences)
+
+    if entity_mismatches:
+        score = min(score, 0.3)
+
     return score, claims
 
 
@@ -231,7 +342,7 @@ async def run_answer_eval(
     answer_lower = answer_text.lower()
     hits = sum(1 for kw in expected_keywords if kw.lower() in answer_lower)
 
-    faith_score, unsupported = await judge_faithfulness(llm, context_text, answer_text)
+    faith_score, unsupported = await judge_faithfulness(llm, context_text, answer_text, item["question"])
     relevance_score = await judge_relevance(llm, item["question"], answer_text)
 
     return AnswerResult(

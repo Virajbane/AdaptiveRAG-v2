@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Backgro
 from fastapi.responses import JSONResponse
 import os
 import tempfile
+import uuid
 from datetime import datetime
 from app.middleware.auth import get_current_user
 from app.db.mongodb.queries import DocumentQueries
@@ -24,6 +25,36 @@ UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "rag_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+async def _purge_document(doc_id: str, user_id: str, db, doc_queries: "DocumentQueries", storage_path: str | None):
+    """
+    Fully remove a document's Qdrant vectors, BM25 chunks, on-disk file
+    (if present), and Mongo record. Shared by DELETE /{doc_id} and by
+    upload_document's replace-on-reupload path, so both stay in sync
+    instead of drifting into two slightly different cleanup routines.
+
+    Each step wrapped independently -- a delete failing partway should
+    never leave searchable content for a doc that's about to be
+    superseded or removed.
+    """
+    try:
+        await qdrant.delete_document_vectors(doc_id=doc_id, user_id=user_id)
+    except Exception as e:
+        print(f"⚠️ Failed to delete Qdrant vectors for {doc_id}: {e}")
+
+    try:
+        await keyword_manager.remove_document(user_id=user_id, doc_id=doc_id)
+    except Exception as e:
+        print(f"⚠️ Failed to remove BM25 chunks for {doc_id}: {e}")
+
+    if storage_path and os.path.exists(storage_path):
+        try:
+            os.remove(storage_path)
+        except Exception as e:
+            print(f"⚠️ Failed to delete file {storage_path}: {e}")
+
+    await doc_queries.delete_document(doc_id, user_id)
+
+
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     file: UploadFile = File(...),
@@ -31,7 +62,22 @@ async def upload_document(
     background_tasks: BackgroundTasks = None,
     db=Depends(get_db)
 ):
-    """Upload a document for processing. Accepts: PDF, DOCX, TXT, CSV. Max size: 50MB."""
+    """
+    Upload a document for processing. Accepts: PDF, DOCX, TXT, CSV. Max size: 50MB.
+
+    REPLACE-ON-REUPLOAD (2026-07-14): uploading a file with the SAME
+    filename as an existing document for this user now REPLACES it --
+    old Qdrant vectors, BM25 chunks, temp file, and Mongo record are
+    purged first, then this upload proceeds as a normal fresh document.
+
+    Why: without this, a same-name re-upload got a brand new doc_id,
+    so none of the existing "replace, don't duplicate" logic (which is
+    keyed on doc_id matching -- see keyword_search.py's 2026-07-04 fix
+    and QdrantVectorDB's point IDs) ever applied. The old and new
+    copies both stayed indexed side by side under different doc_ids,
+    silently doubling up retrieval results for what the user experienced
+    as "the same document."
+    """
 
     if file.filename is None:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -47,13 +93,35 @@ async def upload_document(
     if len(file_content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Max size: 50MB")
 
-    # Save file to temp dir (cross-platform)
-    temp_file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{file.filename}")
+    doc_queries = DocumentQueries(db)
+
+    # Replace-on-reupload: purge any existing document with this exact
+    # filename for this user before creating the new one.
+    existing = await db.documents.find_one({"user_id": user_id, "filename": file.filename})
+    if existing:
+        old_doc_id = str(existing["_id"])
+        print(f"↻ Replacing existing document '{file.filename}' (old doc_id={old_doc_id}) with new upload")
+        await _purge_document(
+            doc_id=old_doc_id,
+            user_id=user_id,
+            db=db,
+            doc_queries=doc_queries,
+            storage_path=existing.get("storage_path"),
+        )
+
+    # RACE FIX (2026-07-14): was f"{user_id}_{file.filename}" -- collided
+    # whenever two uploads (same OR different intent, e.g. a double-click,
+    # two browser tabs, or a re-upload landing while the prior one is
+    # still mid-Docling-convert) shared a filename, since the path was
+    # deterministic from filename alone. A uuid4 component makes every
+    # upload's temp path unique regardless of filename or timing, so two
+    # in-flight uploads can never overwrite each other's file on disk.
+    unique_suffix = uuid.uuid4().hex[:12]
+    temp_file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{unique_suffix}_{file.filename}")
     with open(temp_file_path, "wb") as f:
         f.write(file_content)
 
     # Create document record in MongoDB
-    doc_queries = DocumentQueries(db)
     doc_id = await doc_queries.create_document(
         user_id=user_id,
         filename=file.filename,
@@ -276,6 +344,10 @@ async def delete_document(
     in hybrid search results, and would resolve to "Unknown document"
     once their doc_id no longer matched a Mongo record (identical
     symptom/root cause to the re-ingestion duplication bug).
+
+    2026-07-14: cleanup steps now shared with upload_document's
+    replace-on-reupload path via _purge_document(), so both stay in
+    sync instead of two near-duplicate cleanup routines drifting apart.
     """
     doc_queries = DocumentQueries(db)
     doc = await doc_queries.get_document(doc_id, user_id)
@@ -283,29 +355,12 @@ async def delete_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Remove Qdrant vectors and BM25 chunks first — a delete failing
-    # midway should never leave searchable content for a doc Mongo no
-    # longer lists. Each wrapped independently so one failing doesn't
-    # skip the other.
-    try:
-        await qdrant.delete_document_vectors(doc_id=doc_id, user_id=user_id)
-    except Exception as e:
-        print(f"⚠️ Failed to delete Qdrant vectors for {doc_id}: {e}")
-
-    try:
-        await keyword_manager.remove_document(user_id=user_id, doc_id=doc_id)
-    except Exception as e:
-        print(f"⚠️ Failed to remove BM25 chunks for {doc_id}: {e}")
-
-    storage_path = doc.get("storage_path")
-    if storage_path and os.path.exists(storage_path):
-        try:
-            os.remove(storage_path)
-        except Exception as e:
-            print(f"⚠️ Failed to delete file {storage_path}: {e}")
-
-    deleted = await doc_queries.delete_document(doc_id, user_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Document not found")
+    await _purge_document(
+        doc_id=doc_id,
+        user_id=user_id,
+        db=db,
+        doc_queries=doc_queries,
+        storage_path=doc.get("storage_path"),
+    )
 
     return {"doc_id": doc_id, "status": "deleted"}

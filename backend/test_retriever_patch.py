@@ -22,9 +22,9 @@ from app.db.mongodb.client import connect_to_mongo, get_db
 from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
 
 TEST_QUESTIONS = [
-    ("retrieval_prose_backchannel_prob_1",
-     "What is the probability used for backchannel injection during post-processing in the data synthesis pipeline?",
-     "0.5"),
+    ("retrieval_figure_utmos_stepaudio_1",
+     "What UTMOS score did the Step-Audio-2 backbone achieve?",
+     "4.44"),
 ]
 
 
@@ -60,7 +60,8 @@ async def main():
         for i, doc in enumerate(raw_candidates, 1):
             score = doc.get("rerank_score", doc.get("combined_score", 0.0))
             hit = "<-- EXPECTED VALUE HERE" if expected_value in doc.get("text", "") else ""
-            print(f"  {i}. score={score:.4f} | {doc.get('text', '')[:70]}... {hit}")
+            print(f"  {i}. score={score:.4f} {hit}")
+            print(f"     FULL TEXT: {doc.get('text', '')!r}")
 
         # --- ACTUAL AGENT PATH (with narrowing applied) ---
         state = AgentState(question=question, user_id=args.user_id)
