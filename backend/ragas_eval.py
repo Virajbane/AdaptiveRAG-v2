@@ -2,47 +2,60 @@
 ragas_eval.py
 
 Ragas-based eval harness, wired to the SAME pipeline as eval_rag.py
-(AgentOrchestrator.process + HybridSearchEngine.search), but using Ragas's
-standard metric suite and its LLM-as-judge machinery instead of hand-rolled
-prompts.
+(AgentOrchestrator.process + HybridSearchEngine.search), using Ragas's
+standard metric suite for judge-based scoring PLUS the same deterministic
+checks eval_rag.py runs, imported from rag_eval_common.py so both scripts
+can't drift on shared logic.
 
-Judge model: local Ollama (free, no API key). Uses the same nomic-embed-text
-embeddings you already have running for retrieval, so no extra embedding
-service is needed.
+Full metric suite this script now reports:
 
-WHY A SEPARATE reference-free / reference-based PATH:
-    Your golden_set.json currently stores "expected_answer_contains" (a list
-    of acceptable keywords), not a full ground-truth answer. Ragas's
-    reference-based metrics (context_recall, factual_correctness) need an
-    actual reference ANSWER string to compare against -- a keyword list
-    isn't enough signal for those specific metrics. So:
-      - If every "answer"-type item has a "reference" field -> full suite.
-      - Otherwise -> reference-free suite only (faithfulness, response
-        relevancy, context precision without reference), and a warning is
-        printed telling you which items are missing "reference" and how
-        to add it.
-    This avoids silently mislabeling keyword-matching as ground-truth
-    comparison, which would give you a false sense of precision.
+  RETRIEVAL LAYER
+    - Recall@k, MRR              (NEW -- Ragas has no built-in retrieval
+                                   recall@k/MRR metric; added as a plain
+                                   loop, same content-match logic as
+                                   eval_rag.py so the two Recall@6 numbers
+                                   are directly comparable)
+    - Context precision           (Ragas, LLM-judged -- unchanged)
+    - Context recall               (Ragas, only if references present)
+
+  GENERATION LAYER
+    - Faithfulness                 (Ragas, LLM-judged -- unchanged)
+    - Answer relevancy              (Ragas, 7B+ judge only -- unchanged)
+    - Factual correctness           (Ragas, 7B+ judge + references only)
+    - Entity-attribution accuracy   (NEW -- same deterministic check as
+                                     eval_rag.py, reported standalone. This
+                                     is the metric the report confirmed
+                                     Ragas's own faithfulness metric MISSES
+                                     -- the LLM judge scored both confirmed
+                                     UTMOS fabrications as faithfulness=1.0,
+                                     same failure mode as the local judge.)
+
+  SAFETY / ROBUSTNESS LAYER
+    - Hallucination trap pass rate  (NEW)
+    - False-decline rate            (NEW)
+
+  OPERATIONAL LAYER
+    - Ingestion completeness gate   (NEW, runs first)
+    - Cache hit accuracy + latency  (NEW)
 
 Install (all free / local, no API keys):
     pip install ragas langchain-ollama
 
-Run (defaults sized for constrained hardware: qwen2.5:0.5b judge, max_workers=1):
+Run:
     ollama pull qwen2.5:0.5b
-    ollama pull nomic-embed-text  # you already have this
+    ollama pull nomic-embed-text
 
     python ragas_eval.py --golden golden_set.json --user-id <test_user_id>
 
-answer_relevancy and factual_correctness auto-disable below 2B params since
-they gave unreliable/misleading scores at that size in testing (see prior
-run logs). If you ever get more capable hardware, pass --judge-model
-qwen2.5:7b --num-ctx 4096 to get the full metric suite back.
+answer_relevancy and factual_correctness auto-disable below 2B params.
+Pass --judge-model qwen2.5:7b --num-ctx 4096 for the full suite.
 """
 
 import argparse
 import asyncio
 import json
 import sys
+import time
 from typing import List, Optional
 
 from ragas import evaluate, EvaluationDataset, RunConfig
@@ -57,60 +70,94 @@ from ragas.metrics import (
 )
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
+from rag_eval_common import (
+    entity_attribution_pass,
+    score_hallucination_trap,
+    score_false_decline,
+    check_ingestion_completeness,
+    CacheMetricTracker,
+    load_golden_set_v2,
+)
 
-def load_golden_set(path: str) -> List[dict]:
-    """Same placeholder-skip logic as eval_rag.py, so both harnesses treat
-    an unfinished golden_set.json identically."""
-    with open(path, "r", encoding="utf-8") as f:
-        items = json.load(f)
-    placeholders = [it["id"] for it in items if "REPLACE" in json.dumps(it) or "SET_AFTER" in json.dumps(it)]
-    if placeholders:
-        print(f"[WARN] {len(placeholders)} golden set entries still contain "
-              f"placeholder values and will be skipped: {placeholders}")
-    return [it for it in items if "REPLACE" not in json.dumps(it) and "SET_AFTER" not in json.dumps(it)]
+
+def _content_match(text: str, expected_keywords: List[str]) -> bool:
+    text_lower = text.lower()
+    return any(kw.lower() in text_lower for kw in expected_keywords)
+
+
+async def run_retrieval_metrics(golden_items: List[dict], hybrid_engine, user_id: str, top_k: int):
+    """Recall@k + MRR, added because Ragas has no built-in equivalent --
+    its context_precision/context_recall metrics judge RELEVANCE of what
+    was retrieved, not whether the retriever found the right thing at
+    all. Same content-match logic as eval_rag.py on purpose, so the two
+    Recall@6 numbers are apples-to-apples across both harnesses."""
+    results = []
+    for item in golden_items:
+        if item.get("type") != "retrieval":
+            continue
+        t0 = time.perf_counter()
+        retrieved = await hybrid_engine.search(
+            query=item["question"], user_id=user_id, top_k=top_k,
+            document_id=item.get("document_id"),
+        )
+        latency = time.perf_counter() - t0
+        expected_keywords = item.get("expected_answer_contains", [])
+        found, rank = False, None
+        for i, r in enumerate(retrieved, start=1):
+            if _content_match(r.get("text", ""), expected_keywords):
+                found, rank = True, i
+                break
+        results.append({"id": item["id"], "found": found, "rank": rank, "latency_s": latency})
+    return results
+
+
+def print_retrieval_report(results, top_k: int):
+    print("\n" + "=" * 60)
+    print("1. RETRIEVAL EVAL (Recall@k / MRR -- not a Ragas built-in metric)")
+    print("=" * 60)
+    if not results:
+        print("(no retrieval-type items in golden set)")
+        return
+    recall = sum(1 for r in results if r["found"]) / len(results)
+    mrr = sum((1 / r["rank"]) if r["found"] else 0 for r in results) / len(results)
+    avg_latency = sum(r["latency_s"] for r in results) / len(results)
+    print(f"Recall@{top_k}: {recall:.2%}  ({sum(1 for r in results if r['found'])}/{len(results)})")
+    print(f"MRR:        {mrr:.3f}")
+    print(f"Avg latency: {avg_latency:.2f}s")
+    for r in results:
+        status = f"rank {r['rank']}" if r["found"] else "NOT FOUND"
+        print(f"  [{r['id']}] {status}")
 
 
 async def build_samples(golden_items: List[dict], orchestrator, hybrid_engine, user_id: str, top_k: int = 6):
     """Runs the real pipeline for each 'answer'-type item and assembles
-    Ragas-shaped samples: user_input, response, retrieved_contexts, and
-    an optional reference answer if the golden item provides one.
-
-    Deliberately re-fetches contexts fresh (full text) rather than reusing
-    any truncated citation preview the orchestrator's state may carry --
-    same reasoning as the fix already in eval_rag.py: judges need the full
-    chunk text, not a 200-char citation stub, or true-but-late-in-chunk
-    facts get wrongly flagged as unsupported.
+    Ragas-shaped samples, PLUS the deterministic checks from
+    rag_eval_common (entity-attribution, hallucination trap, false
+    decline) attached as extra fields alongside each sample -- Ragas
+    doesn't know about these, so they're tracked separately and reported
+    in their own section, not passed into `evaluate()`.
     """
     samples = []
+    extra_checks = []
     missing_reference = []
 
     for item in golden_items:
         if item.get("type") != "answer":
             continue
 
+        t0 = time.perf_counter()
         state = await orchestrator.process(item["question"], user_id)
+        latency = time.perf_counter() - t0
         answer_text = state.get("answer", "") if isinstance(state, dict) else getattr(state, "answer", "")
 
-        # NOTE: deliberately NOT filtering by item.get("document_id") here.
-        # The orchestrator itself resolves documents by content/score match
-        # and passes document_id_filter=None when confidence is high enough
-        # (see "[DOC_RESOLVER] ... no filter applied" in your logs) --
-        # that's the path that actually finds the right chunks. Any
-        # document_id stored in golden_set.json can go stale (re-ingestion,
-        # re-upload, DB reset) without the golden set being updated, and a
-        # stale ID silently hard-filters hybrid_engine.search() down to
-        # zero results instead of erroring -- which is exactly what
-        # happened in your last run (every single item: "0 contexts").
-        # Matching the orchestrator's own successful behavior is safer than
-        # trusting a filter value that isn't verified against live data.
         retrieved = await hybrid_engine.search(
             query=item["question"], user_id=user_id, top_k=top_k
         )
         contexts = [r["text"] for r in retrieved]
         if not contexts:
-            print(f"[WARN] {item['id']}: retrieval returned 0 chunks even WITHOUT a document_id filter. "
-                  f"This item's faithfulness/context scores will be meaningless -- check that the document "
-                  f"is actually indexed for user_id={user_id}.")
+            print(f"[WARN] {item['id']}: retrieval returned 0 chunks. This item's "
+                  f"faithfulness/context scores will be meaningless -- check indexing "
+                  f"for user_id={user_id}.")
 
         reference = item.get("reference")
         if not reference:
@@ -125,9 +172,47 @@ async def build_samples(golden_items: List[dict], orchestrator, hybrid_engine, u
             sample["reference"] = reference
 
         samples.append(sample)
+
+        context_text = "\n\n".join(contexts)
+        extra_checks.append({
+            "id": item["id"],
+            "entity_attribution_ok": entity_attribution_pass(answer_text, context_text, item["question"]),
+            "hallucination_trap_pass": score_hallucination_trap(item, answer_text),
+            "false_decline": score_false_decline(item, answer_text),
+            "latency_s": latency,
+        })
+
         print(f"[COLLECTED] {item['id']}: {len(contexts)} contexts, answer len={len(answer_text)}")
 
-    return samples, missing_reference
+    return samples, extra_checks, missing_reference
+
+
+def print_extra_checks_report(extra_checks):
+    print("\n" + "=" * 60)
+    print("2b. DETERMINISTIC CHECKS (not part of Ragas's metric suite)")
+    print("=" * 60)
+    entity_checks = [c["entity_attribution_ok"] for c in extra_checks if c["entity_attribution_ok"] is not None]
+    trap_checks = [c["hallucination_trap_pass"] for c in extra_checks if c["hallucination_trap_pass"] is not None]
+    false_declines = [c["false_decline"] for c in extra_checks if c["false_decline"] is not None]
+    if extra_checks:
+        avg_latency = sum(c["latency_s"] for c in extra_checks) / len(extra_checks)
+        print(f"Avg latency:                 {avg_latency:.2f}s")
+    if entity_checks:
+        rate = sum(entity_checks) / len(entity_checks)
+        print(f"Entity-attribution accuracy: {rate:.2%}  (n={len(entity_checks)}) -- Ragas's own "
+              f"faithfulness metric misses this class of error; see §2.2 of the bug report")
+    if trap_checks:
+        rate = sum(trap_checks) / len(trap_checks)
+        print(f"Hallucination trap pass:     {rate:.2%}  ({sum(trap_checks)}/{len(trap_checks)})")
+    if false_declines:
+        rate = sum(false_declines) / len(false_declines)
+        print(f"False-decline rate:          {rate:.2%}  ({sum(false_declines)}/{len(false_declines)}, lower is better)")
+    for c in extra_checks:
+        e = "" if c["entity_attribution_ok"] is None else ("entity=OK" if c["entity_attribution_ok"] else "entity=MISMATCH")
+        t = "" if c["hallucination_trap_pass"] is None else ("trap=PASS" if c["hallucination_trap_pass"] else "trap=FAIL")
+        flags = " ".join(x for x in [e, t] if x)
+        if flags:
+            print(f"  [{c['id']}] {flags}")
 
 
 def build_metrics(evaluator_llm, evaluator_embeddings, have_full_references: bool, judge_model: str):
@@ -136,11 +221,6 @@ def build_metrics(evaluator_llm, evaluator_embeddings, have_full_references: boo
 
     metrics = [Faithfulness(llm=evaluator_llm)]
 
-    # ResponseRelevancy's "noncommittal" classification step needs enough
-    # reasoning to reliably tell "declines to answer" apart from "answers
-    # but briefly" -- a sub-1B judge conflates these (that's what tanked
-    # the 0.5b run's aggregate to 0.10 even on clearly on-topic answers).
-    # 7B+ models handle this distinction correctly, so only skip it below 2B.
     if is_small:
         print(f"[SKIP] Leaving out answer_relevancy -- '{judge_model}' unreliably flags normal answers as "
               f"'noncommittal'. Use a 7B+ judge to get this metric.")
@@ -151,10 +231,6 @@ def build_metrics(evaluator_llm, evaluator_embeddings, have_full_references: boo
 
     if have_full_references:
         metrics.append(LLMContextRecall(llm=evaluator_llm))
-        # FactualCorrectness does multi-step claim decomposition + entailment
-        # checking -- the most reasoning-heavy metric in the suite. A sub-1B
-        # judge is unreliable enough at this that it's better left out than
-        # reported with false precision. Swap to a 7B+ Ollama model to get it.
         if not is_small:
             metrics.append(FactualCorrectness(llm=evaluator_llm))
         else:
@@ -168,38 +244,30 @@ async def main():
     parser.add_argument("--golden", default="golden_set.json")
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--top-k", type=int, default=6)
-    parser.add_argument("--judge-model", default="qwen2.5:0.5b",
-                         help="Free local Ollama model used as the Ragas judge. 7B+ is more reliable but too "
-                              "slow/heavy for constrained hardware -- 0.5b trades reliability for speed. "
-                              "answer_relevancy and factual_correctness auto-disable below 2B params since "
-                              "they were unreliable at that size in testing.")
+    parser.add_argument("--judge-model", default="qwen2.5:0.5b")
     parser.add_argument("--embed-model", default="nomic-embed-text")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
-    parser.add_argument("--max-workers", type=int, default=1,
-                         help="Concurrent judge calls. Keep at 1 for a small/constrained GPU.")
-    parser.add_argument("--num-ctx", type=int, default=2048,
-                         help="Ollama context window for the judge model. Lower this if you hit OOM.")
+    parser.add_argument("--max-workers", type=int, default=1)
+    parser.add_argument("--num-ctx", type=int, default=2048)
+    parser.add_argument("--cache-hit-threshold-s", type=float, default=5.0)
     parser.add_argument("--out", default="ragas_results.csv")
     args = parser.parse_args()
 
-    # Small (<2B) judge models frequently fail to produce the structured
-    # (JSON/pydantic) output Ragas' default prompts expect, and reason less
-    # reliably than a 7-8B judge on multi-step grading like faithfulness
-    # claim decomposition. This isn't a reason to block you if that's what
-    # you have -- it just means: expect a higher parse-failure/retry rate,
-    # and treat per-sample scores as directional rather than precise.
     approx_param_count = args.judge_model.split(":")[-1]
     if any(tag in approx_param_count.lower() for tag in ["0.5b", "1b", "1.5b", "2b"]):
         print(f"[CAUTION] '{args.judge_model}' is a small judge model. Faithfulness/relevancy scores from "
-              f"it will be noisier than a 7B+ judge -- use them as rough directional signal, and spot-check "
-              f"the per-sample CSV rather than trusting the aggregate number alone.\n")
+              f"it will be noisier than a 7B+ judge -- treat as directional, spot-check the CSV, and lean "
+              f"on the deterministic checks (entity-attribution, hallucination trap) below, since those "
+              f"don't depend on judge size at all.\n")
 
-    golden_items = load_golden_set(args.golden)
+    golden = load_golden_set_v2(args.golden)
+    golden_items = golden["items"]
+    ingestion_check_cfg = golden["ingestion_check"]
+
     if not golden_items:
         print("No usable golden set entries. Fill in golden_set.json first.")
         sys.exit(1)
 
-    # --- same wiring as eval_rag.py -----------------------------------
     from app.services.retrieval.hybrid_search import HybridSearchEngine
     from app.db.mongodb.client import connect_to_mongo
     from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
@@ -210,29 +278,69 @@ async def main():
 
     hybrid_engine = HybridSearchEngine()
     orchestrator = AgentOrchestrator()
-    # -------------------------------------------------------------------
 
-    samples, missing_reference = await build_samples(
+    # --- 0. Ingestion completeness gate ---------------------------------
+    ingestion_report = None
+    if ingestion_check_cfg:
+        expected_pages = ingestion_check_cfg.get("expected_pages", [])
+        # chunks_by_page = await your_chunk_store.count_by_page(args.user_id)
+        chunks_by_page = {}  # <-- REPLACE with real query before trusting this gate
+        ingestion_report = check_ingestion_completeness(chunks_by_page, expected_pages)
+        if not chunks_by_page:
+            print("[WARN] ingestion_check configured but chunks_by_page query isn't wired "
+                  "up yet -- placeholder in main(). This will show FAIL until connected.")
+
+    print("\n" + "=" * 60)
+    print("0. INGESTION COMPLETENESS GATE")
+    print("=" * 60)
+    if ingestion_report is None:
+        print("(no top-level 'ingestion_check' in golden set -- skipped)")
+    else:
+        status = "PASS" if ingestion_report["complete"] else "FAIL"
+        print(f"Status: {status}  (coverage: {ingestion_report['coverage']:.1%})")
+        if ingestion_report["missing_pages"]:
+            print(f"MISSING PAGES: {ingestion_report['missing_pages']}")
+
+    # --- 1. Retrieval metrics (NEW) -------------------------------------
+    retrieval_results = await run_retrieval_metrics(golden_items, hybrid_engine, args.user_id, args.top_k)
+    print_retrieval_report(retrieval_results, args.top_k)
+
+    # --- 2. Answer samples for Ragas + deterministic checks -------------
+    samples, extra_checks, missing_reference = await build_samples(
         golden_items, orchestrator, hybrid_engine, args.user_id, top_k=args.top_k
     )
+
+    # --- 3. Cache metrics (NEW) ------------------------------------------
+    cache_tracker = CacheMetricTracker(hit_threshold_s=args.cache_hit_threshold_s)
+    for item in golden_items:
+        if item.get("type") == "cache":
+            await cache_tracker.run(
+                item, lambda q, u: orchestrator.process(q, u), args.user_id
+            )
+    cache_summary = cache_tracker.summary()
+
     if not samples:
         print("No 'answer'-type items found in golden set -- Ragas needs question/answer/context samples.")
-        sys.exit(1)
+        print_extra_checks_report(extra_checks)
+        if cache_summary:
+            print("\n" + "=" * 60)
+            print("4. CACHE METRICS")
+            print("=" * 60)
+            print(f"Cache accuracy: {cache_summary['cache_accuracy']:.2%}  (n={cache_summary['n']})")
+        sys.exit(0)
 
     have_full_references = len(missing_reference) == 0
     if not have_full_references:
         print(f"\n[INFO] {len(missing_reference)} item(s) have no 'reference' answer field: {missing_reference}")
-        print("       Running reference-free metrics only (faithfulness, response_relevancy, "
-              "context_precision_without_reference).")
-        print("       To also get context_recall + factual_correctness, add a \"reference\": \"<ground truth "
-              "answer>\" field to every 'answer'-type golden set item.\n")
+        print("       Running reference-free metrics only. Add \"reference\": \"<ground truth answer>\" "
+              "to every 'answer'-type item to also get context_recall + factual_correctness.\n")
 
-    decline_ids = [it["id"] for it in golden_items if it.get("type") == "answer" and it["id"].startswith("decline_")]
+    decline_ids = [it["id"] for it in golden_items if it.get("type") == "answer" and
+                   (it.get("expects_decline") or it["id"].startswith("decline_"))]
     if decline_ids:
         print(f"[INFO] {len(decline_ids)} item(s) are intentional-decline questions: {decline_ids}")
-        print("       response_relevancy scores these near 0 by design (it flags 'noncommittal' answers), "
-              "regardless of whether the decline was correct. Check these rows individually in the CSV "
-              "rather than letting them pull down your aggregate answer_relevancy score.\n")
+        print("       response_relevancy scores these near 0 by design -- check the hallucination "
+              "trap pass rate in section 2b instead of the Ragas relevancy aggregate for these.\n")
 
     dataset = EvaluationDataset.from_list(samples)
 
@@ -241,7 +349,7 @@ async def main():
             model=args.judge_model,
             base_url=args.ollama_url,
             temperature=0,
-            num_ctx=args.num_ctx,  # 2048 default keeps memory use low for constrained hardware
+            num_ctx=args.num_ctx,
         )
     )
     evaluator_embeddings = LangchainEmbeddingsWrapper(
@@ -250,10 +358,6 @@ async def main():
 
     metrics = build_metrics(evaluator_llm, evaluator_embeddings, have_full_references, args.judge_model)
 
-    # max_workers=1 avoids sending concurrent requests to a constrained GPU
-    # (which either OOMs or just queues anyway, so parallelism buys nothing).
-    # Higher max_retries + longer timeout compensate for the small judge
-    # model occasionally failing to produce parseable structured output.
     run_config = RunConfig(timeout=180, max_retries=5, max_workers=args.max_workers)
 
     print(f"Running Ragas eval with judge='{args.judge_model}' (Ollama), embeddings='{args.embed_model}', "
@@ -261,13 +365,25 @@ async def main():
     result = evaluate(dataset=dataset, metrics=metrics, run_config=run_config)
 
     print("\n" + "=" * 60)
-    print("RAGAS RESULTS (aggregate)")
+    print("2a. RAGAS RESULTS (aggregate)")
     print("=" * 60)
     print(result)
 
+    print_extra_checks_report(extra_checks)
+
+    print("\n" + "=" * 60)
+    print("3. CACHE METRICS")
+    print("=" * 60)
+    if cache_summary:
+        print(f"Cache accuracy:      {cache_summary['cache_accuracy']:.2%}  (n={cache_summary['n']})")
+        print(f"Avg cold latency:    {cache_summary['avg_cold_latency_s']}s")
+        print(f"Avg warm latency:    {cache_summary['avg_warm_latency_s']}s")
+    else:
+        print("(no type:'cache' items in golden set -- skipped)")
+
     df = result.to_pandas()
     df.to_csv(args.out, index=False)
-    print(f"\nPer-sample scores written to {args.out}")
+    print(f"\nPer-sample Ragas scores written to {args.out}")
 
 
 if __name__ == "__main__":
