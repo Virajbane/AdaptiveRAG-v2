@@ -143,7 +143,7 @@ def build_agent_graph(db=None):
     grader     = GraderAgent(fast_llm)             # no LLM call made, but BaseAgent needs an llm arg
     tool_agent = ToolAgent(fast_llm)
     critic     = CriticAgent(fast_llm)
-    answer     = AnswerAgent(fast_llm)   # 2026-07-04: deep-reasoning model — see note above
+    answer     = AnswerAgent(llm)   # 2026-07-04: deep-reasoning model — see note above
 
     # ── Timing helper ─────────────────────────────────────────────────────
 
