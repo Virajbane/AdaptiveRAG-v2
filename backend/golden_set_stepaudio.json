@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "prose_01",
+      "type": "retrieval",
+      "document_id": "6a5686810620b3b99b1f6324",
+      "question": "What backbone model does Lychee-FD use as its half-duplex base?",
+      "expected_answer_contains": [
+        "StepAudio-2-mini",
+        "Step-Audio-2-mini"
+      ]
+    },
+    {
+      "id": "cache_neardup_01",
+      "type": "cache",
+      "document_id": "6a5686810620b3b99b1f6324",
+      "question": "Which model does Lychee-FD use as its half-duplex starting point?",
+      "note": "Semantic rephrase of prose_01/cache_01, not an exact repeat -- the 'cache_neardup_' id prefix tells CacheMetricTracker to expect a MISS, testing that the exact-hash cache doesn't falsely treat this as identical to the earlier question."
+    }
+  ]
+}

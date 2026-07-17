@@ -3,6 +3,13 @@ from app.agents.state import AgentState
 from app.agents.prompts import ANSWER_PROMPT
 import re
 
+# Excludes digits embedded inside hyphenated/alphanumeric identifiers
+# (e.g. "StepAudio-2-mini", "GPT-5-Duplex") -- those aren't factual
+# claims to verify, they're part of a proper noun. Confirmed root cause
+# of a false-decline: "StepAudio-2-mini" (a correct answer) was rejected
+# because the embedded "2" was treated as an unverified numeric claim.
+_NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
+
 
 def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     """If a number in the answer never appears anywhere in the context
@@ -31,7 +38,7 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     back to the original "does the number appear anywhere" check, since
     there's no entity to anchor against.
     """
-    numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
+    numbers_in_answer = _NUM_RE.findall(answer)
     if not numbers_in_answer:
         return True
 
