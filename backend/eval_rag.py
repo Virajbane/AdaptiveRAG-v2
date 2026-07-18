@@ -389,16 +389,42 @@ async def main():
     # is present AND you fill in the real chunks_by_page query -- adjust
     # the collection/field names to match your ingestion pipeline
     # (Qdrant payload page field, or a Mongo `chunks` collection, etc.)
+    await connect_to_mongo()
+    from app.db.mongodb.client import get_db  # or however connect_to_mongo exposes it
+    db = get_db()
+    await rebuild_bm25_indexes()
+    # --- 0. Ingestion completeness gate ---------------------------------
     ingestion_report = None
     if ingestion_check_cfg:
         expected_pages = ingestion_check_cfg.get("expected_pages", [])
-        # chunks_by_page = await your_chunk_store.count_by_page(args.user_id)
-        chunks_by_page = {}  # <-- REPLACE with real query before trusting this gate
+
+        # pages_fully_lost is the authoritative signal from ingestion
+        # (DocumentProcessor.process(), see app/services/document/
+        # processor.py) -- it's the only case where content is genuinely
+        # unrecoverable (failed Docling, failed single-page retry, AND
+        # failed the PyMuPDF fallback). Normally-parsed chunks carry no
+        # page field at all (see docling_chunker.py), so counting chunks
+        # per page isn't possible/reliable -- treating "not in
+        # pages_fully_lost" as "present" is the accurate signal we
+        # actually have, not an approximation of one we don't.
+        doc = await db.documents.find_one({"user_id": args.user_id})
+        if doc is None:
+            print(f"[WARN] No document found for user_id={args.user_id} "
+                  f"— ingestion gate cannot run.")
+            pages_fully_lost = []
+        else:
+            pages_fully_lost = doc.get("pages_fully_lost", [])
+            if "pages_fully_lost" not in doc:
+                print(f"[WARN] Document {doc['_id']} has no 'pages_fully_lost' "
+                      f"field — it may have been ingested before this field "
+                      f"was added. Re-run /retry on this document, or this "
+                      f"gate will report all pages as present by default.")
+
+        chunks_by_page = {
+            p: (0 if p in pages_fully_lost else 1)
+            for p in expected_pages
+        }
         ingestion_report = check_ingestion_completeness(chunks_by_page, expected_pages)
-        if not chunks_by_page:
-            print("[WARN] ingestion_check is configured but chunks_by_page query is not "
-                  "wired up yet (still a placeholder in main()). This gate will report "
-                  "'FAIL' on every page until you connect it to your real chunk metadata.")
 
     # --- 1 & 2. Retrieval + answer evals ---------------------------------
     retrieval_results = []

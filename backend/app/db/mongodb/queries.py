@@ -150,7 +150,8 @@ class DocumentQueries:
         chunks_info: dict = None,
         chunks_failed: int = None,
         failed_chunk_indices: list = None,
-        docling_page_errors: list = None,   # NEW
+        docling_page_errors: list = None,
+        pages_fully_lost: list = None,        # NEW
         user_id: str = None,
     ) -> bool:
         """Update document status during processing"""
@@ -176,11 +177,13 @@ class DocumentQueries:
         if failed_chunk_indices is not None:
             update_data["failed_chunk_indices"] = failed_chunk_indices
 
-        if docling_page_errors is not None:   # NEW -- same is-not-None guard
-                                                # pattern as the other optional
-                                                # fields, so existing callers
-                                                # that don't pass it are unaffected
+        if docling_page_errors is not None:
             update_data["docling_page_errors"] = docling_page_errors
+
+        if pages_fully_lost is not None:      # NEW -- same is-not-None guard
+                                                # pattern, existing callers
+                                                # unaffected
+            update_data["pages_fully_lost"] = pages_fully_lost
 
         result = await self.collection.update_one(
             {"_id": ObjectId(doc_id)},

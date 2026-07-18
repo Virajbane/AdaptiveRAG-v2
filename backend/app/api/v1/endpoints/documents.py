@@ -187,7 +187,14 @@ async def process_document(doc_id: str, user_id: str, file_path: str, file_type:
             },
             chunks_failed=result["chunks_failed"],
             failed_chunk_indices=result["failed_chunk_indices"],
-            docling_page_errors=result["docling_page_errors"],   # NEW
+            docling_page_errors=result["docling_page_errors"],
+            pages_fully_lost=result["pages_fully_lost"],   # NEW -- was computed
+                                                            # by processor.process()
+                                                            # but never persisted,
+                                                            # so the ingestion gate
+                                                            # had nothing real to
+                                                            # query. See eval
+                                                            # bug report §2.1.
             user_id=user_id,
         )
 
