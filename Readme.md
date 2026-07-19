@@ -1,6 +1,6 @@
 # RAG 2.0 — Adaptive Retrieval-Augmented Generation System
 
-An enterprise-style, multi-agent RAG system that doesn't just search documents — it **decides where to look first, checks its own retrieval, and refuses to guess when it isn't sure.**
+An enterprise-style, multi-agent RAG system that doesn't just search documents — it **decides where to look first, checks its own retrieval, and refuses to guess when it isn't sure.** 
 
 A planner agent analyzes each question, a retriever agent runs hybrid (vector + keyword) search, a grader agent filters out weak evidence before it ever reaches the LLM, and a critic agent double-checks the final answer for hallucination — all running on a local, self-hosted LLM via Ollama.
 
