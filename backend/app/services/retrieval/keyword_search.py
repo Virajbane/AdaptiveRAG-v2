@@ -2,6 +2,17 @@ from rank_bm25 import BM25Plus
 from typing import List, Optional
 import re
 
+from nltk.stem import PorterStemmer
+
+# Module-level singleton, same convention as bge_reranker in reranker.py.
+# PorterStemmer is a pure algorithmic stemmer with no corpus/model
+# download required (unlike a lemmatizer, e.g. WordNetLemmatizer), so
+# this adds negligible memory/startup cost -- safe even on constrained
+# hardware. One shared instance avoids re-constructing it on every
+# _tokenize() call.
+_stemmer = PorterStemmer()
+
+
 class KeywordSearchEngine:
     def __init__(self):
         self.bm25 = None
@@ -76,8 +87,28 @@ class KeywordSearchEngine:
         return results
 
     def _tokenize(self, text: str) -> List[str]:
+        """
+        FIX (2026-07-21) -- stemming added. Previously this only
+        lowercased and split on \\w+, so BM25 compared literal word
+        forms: "optimizer" (in a question) and "optimize" (in the
+        source text, e.g. "we optimize our model using AdamW") were
+        two entirely different tokens with zero overlap, no matter how
+        semantically identical they are. That's not a tuning issue --
+        BM25 is supposed to match word roots, and every standard
+        production setup (Lucene, Elasticsearch, Whoosh + rank_bm25)
+        stems both index and query text before comparing. Stemming
+        here (the single point both build_index() and search() funnel
+        through) fixes it for every query/chunk pair at once, instead
+        of patching one word pair at a time via query expansion.
+
+        Both sides of every comparison MUST use this same method --
+        never stem only the query or only the index -- so keeping this
+        as the one shared _tokenize() implementation (rather than
+        duplicating stemming logic at each call site) is intentional.
+        """
         text = text.lower()
-        return re.findall(r'\w+', text)
+        tokens = re.findall(r'\w+', text)
+        return [_stemmer.stem(t) for t in tokens]
 
 
 class KeywordSearchManager:
@@ -117,6 +148,14 @@ class KeywordSearchManager:
       is removed. Rebuilding BM25Plus on an empty corpus divides by
       zero internally (avg doc length = sum/len(corpus)). Fixed at the
       source in KeywordSearchEngine.build_index() -- see comment there.
+
+    2026-07-21 fix — stemming:
+      KeywordSearchEngine._tokenize() now stems tokens (see comment
+      there). This class calls build_index()/rebuild_from_chunks(),
+      which re-tokenizes from raw chunk text every time, so existing
+      indexes automatically pick up stemming on the next
+      index_document()/remove_document()/rebuild_from_chunks() call --
+      no separate migration needed here.
     """
 
     def __init__(self):

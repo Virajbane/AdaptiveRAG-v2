@@ -1,8 +1,8 @@
 'use client';
 
-// Library view: upload dropzone + documents list with delete.
-// All document-specific state and API logic lives here — if uploads or
-// deletes break, this is the only file you need to touch/paste.
+// Library view: upload dropzone + documents list with delete + retry.
+// All document-specific state and API logic lives here — if uploads,
+// deletes, or retries break, this is the only file you need to touch/paste.
 //
 // MULTI-FILE FIX (2026-07-14): previously the <input> had no `multiple`
 // attribute (so the OS picker dialog itself wouldn't allow selecting more
@@ -12,22 +12,59 @@
 // in parallel (each gets its own doc_id/background task server-side,
 // same as the single-file endpoint always assumed), then refreshes the
 // document list ONCE at the end instead of once per file.
+//
+// RETRY BUTTON ADDED: the backend has had POST /documents/{doc_id}/retry
+// since before this file was last touched, but nothing in the UI ever
+// called it -- a "failed" or "processed_with_gaps" document had no way
+// to be fixed short of deleting and re-uploading the whole file. Retry
+// is only shown for those two statuses, matching the backend's own
+// guard (retry_document rejects anything else with a 400), so this
+// never renders a button that would just error when clicked.
+//
+// POLLING ADDED: FileUpload.jsx's own comments already assumed this view
+// "polls on its own" after an upload -- it didn't. A document could
+// finish processing entirely on the backend (see server logs: chunked,
+// embedded, stored) while the screen kept showing "processing" until the
+// user manually refreshed. Now, whenever any document is in "processing",
+// this view quietly re-fetches every few seconds (no loading spinner) and
+// stops on its own once nothing is in-flight anymore.
 
 import { useState, useRef, useEffect } from 'react';
 import { S } from '../styles';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Statuses the backend's /retry endpoint will actually accept.
+// ("processing" is also technically retryable server-side, but only
+// when stale -- there's no reliable way to tell that from this list
+// payload alone, so we don't offer retry for "processing" here to
+// avoid a button that 409s on a genuinely still-running job.)
+const RETRYABLE_STATUSES = new Set(['failed', 'processed_with_gaps']);
+
+// How often to re-check the list while something is still "processing".
+// Docling parsing + embedding a real paper can take several minutes
+// (see backend logs), so this doesn't need to be aggressive -- it just
+// needs to exist, since right now nothing ever re-fetches after the
+// initial load/upload, and a document that finishes processing in the
+// background sits showing a stale "processing" badge until the user
+// manually refreshes the page.
+const POLL_INTERVAL_MS = 4000;
+
 export default function LibraryView({ token, onDocumentsChange }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deletingId, setDeletingId] = useState(null);
+  const [retryingId, setRetryingId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
-  const fetchDocuments = async () => {
-    setLoading(true);
+  // `silent` skips the loading spinner -- used by the background poll so
+  // a routine "is it done yet?" check doesn't hide the whole list and
+  // flash "Loading…" every few seconds. The real initial page-load fetch
+  // still shows the spinner as before.
+  const fetchDocuments = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const res = await fetch(`${API_URL}/api/v1/documents`, { headers: { Authorization: `Bearer ${token}` } });
@@ -35,9 +72,12 @@ export default function LibraryView({ token, onDocumentsChange }) {
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch (err) {
-      setError(err.message);
+      // Don't surface a visible error for a silent background poll --
+      // a single dropped poll tick will just retry next interval. Only
+      // the user-initiated (non-silent) fetches should show an error.
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -49,6 +89,24 @@ export default function LibraryView({ token, onDocumentsChange }) {
   // Let the parent (Dashboard) know the doc count/list — used for the
   // sidebar "Workspace Docs" shortcuts and the chat "Searching N files" text.
   useEffect(() => { onDocumentsChange?.(documents); }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // POLLING: while any document is still "processing", keep re-fetching
+  // the list on an interval so the UI catches the status change on its
+  // own instead of freezing at "processing" until the user manually
+  // reloads the page. Stops itself the moment nothing is in-flight
+  // anymore -- no wasted requests once everything has settled into
+  // processed / processed_with_gaps / failed.
+  useEffect(() => {
+    const hasInFlight = documents.some(d => d.status === 'processing');
+    if (!hasInFlight) return;
+
+    const id = setInterval(() => {
+      fetchDocuments({ silent: true });
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents]);
 
   // Uploads a single file. Returns { ok, filename, message? } instead of
   // throwing, so one bad file in a batch doesn't abort the rest.
@@ -103,6 +161,31 @@ export default function LibraryView({ token, onDocumentsChange }) {
       setError(err.message);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRetry = async (docId) => {
+    setRetryingId(docId);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/v1/documents/${docId}/retry`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Retry failed');
+      }
+      // Backend re-queues in the background and returns status:"processing"
+      // immediately -- reflect that right away so the row updates without
+      // waiting on a poll cycle, then do a real fetch to pick up whatever
+      // the poller/refresh cadence would show next anyway.
+      setDocuments(prev => prev.map(d => (d._id === docId ? { ...d, status: 'processing' } : d)));
+      await fetchDocuments();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -166,9 +249,23 @@ export default function LibraryView({ token, onDocumentsChange }) {
                 <p style={{ fontSize: 12, color: '#b3b3b3', margin: 0, marginTop: 2 }}>
                   {(doc.file_size_bytes / 1024 / 1024).toFixed(2)} MB • {doc.chunks?.count ?? 0} chunks •{' '}
                   <span style={{ color: statusColor(doc.status) }}>{doc.status}</span>
+                  {doc.status === 'processed_with_gaps' && doc.docling_page_errors?.length > 0 && (
+                    <span style={{ color: '#b3b3b3' }}> ({doc.docling_page_errors.length} page(s) had parse issues)</span>
+                  )}
                 </p>
               </div>
               <span style={{ fontSize: 12, color: '#4d4d4d', flexShrink: 0 }}>{new Date(doc.created_at).toLocaleDateString()}</span>
+
+              {RETRYABLE_STATUSES.has(doc.status) && (
+                <button
+                  onClick={() => handleRetry(doc._id)}
+                  disabled={retryingId === doc._id}
+                  style={{ padding: '5px 12px', borderRadius: 9999, border: '1px solid rgba(83,157,245,0.3)', background: 'transparent', color: '#539df5', fontSize: 12, cursor: 'pointer', flexShrink: 0, opacity: retryingId === doc._id ? 0.5 : 1 }}
+                >
+                  {retryingId === doc._id ? 'Retrying…' : 'Retry'}
+                </button>
+              )}
+
               <button
                 onClick={() => handleDelete(doc._id)}
                 disabled={deletingId === doc._id}

@@ -368,11 +368,12 @@ async def main():
 
     from app.services.retrieval.hybrid_search import HybridSearchEngine
     from app.services.llm.provider import LLMProvider
-    from app.db.mongodb.client import connect_to_mongo
+    from app.db.mongodb.client import connect_to_mongo, get_db
     from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
 
     await connect_to_mongo()
     await rebuild_bm25_indexes()
+    db = await get_db()
 
     hybrid_engine = HybridSearchEngine()
     llm = LLMProvider()
@@ -383,16 +384,6 @@ async def main():
     async def PIPELINE_ENTRYPOINT(question: str, user_id: str):
         return await _orchestrator.process(question, user_id)
 
-    # --- 0. Ingestion completeness gate ---------------------------------
-    # TODO: wire this to your actual chunk-metadata store. Placeholder
-    # below queries nothing and reports "skipped" unless ingestion_check
-    # is present AND you fill in the real chunks_by_page query -- adjust
-    # the collection/field names to match your ingestion pipeline
-    # (Qdrant payload page field, or a Mongo `chunks` collection, etc.)
-    await connect_to_mongo()
-    from app.db.mongodb.client import get_db  # or however connect_to_mongo exposes it
-    db = get_db()
-    await rebuild_bm25_indexes()
     # --- 0. Ingestion completeness gate ---------------------------------
     ingestion_report = None
     if ingestion_check_cfg:
