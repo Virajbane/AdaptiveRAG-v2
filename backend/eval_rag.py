@@ -32,6 +32,11 @@ Full metric suite this script now reports:
       genuinely answerable question. Both directions matter; reporting
       only trap-pass-rate would hide a system that just declines
       everything.)
+      UPDATE (this pass): false_decline is now also surfaced PER-ITEM,
+      not just as an aggregate rate. Previously the only way to find out
+      *which* items were false-declining was to grep [RAW ANSWER] log
+      lines by hand. Now both the per-item line and a dedicated
+      "declining item IDs" rollup print directly in the report.
 
   OPERATIONAL LAYER
     - Ingestion completeness gate (NEW: runs FIRST, before anything else.
@@ -323,6 +328,12 @@ def print_report(retrieval_results, answer_results, cache_summary, ingestion_rep
         if false_declines:
             rate = sum(false_declines) / len(false_declines)
             print(f"False-decline rate:          {rate:.2%}  ({sum(false_declines)}/{len(false_declines)}, lower is better)")
+            # NEW: surface exactly which items are false-declining, instead
+            # of leaving this only as an aggregate rate (see report §4 /
+            # step 2 -- this was the top open item, "never individually
+            # identified in any session").
+            declining_ids = [r.id for r in answer_results if r.false_decline]
+            print(f"  -> declining item IDs: {declining_ids}")
         print(f"Avg latency:                 {avg_latency:.2f}s")
         print()
         for r in answer_results:
@@ -331,7 +342,16 @@ def print_report(retrieval_results, answer_results, cache_summary, ingestion_rep
             rel_str = f"{r.relevance_score:.2f}" if r.relevance_score is not None else "judge failed"
             entity_str = "" if r.entity_attribution_ok is None else (" entity=OK" if r.entity_attribution_ok else " entity=MISMATCH")
             trap_str = "" if r.hallucination_trap_pass is None else (" trap=PASS" if r.hallucination_trap_pass else " trap=FAIL")
-            print(f"  [{r.id}] keywords={kw_str}  faithfulness={faith_str}  relevance={rel_str}{entity_str}{trap_str}")
+            # NEW: per-item false_decline marker -- previously this field
+            # was computed and stored on every AnswerResult but never
+            # printed here, so the only way to find offending items was
+            # to grep [RAW ANSWER] log lines by hand.
+            decline_str = "" if r.false_decline is None else (" false_decline=TRUE" if r.false_decline else "")
+            print(f"  [{r.id}] keywords={kw_str}  faithfulness={faith_str}  relevance={rel_str}{entity_str}{trap_str}{decline_str}")
+            if r.false_decline:
+                # Print the raw answer right here too, so diagnosing *why*
+                # it declined doesn't require a separate log search.
+                print(f"      ^^ FALSE DECLINE -- raw answer: {r.answer!r}")
             if r.unsupported_claims:
                 print(f"      unsupported claims flagged: {r.unsupported_claims}")
     else:
