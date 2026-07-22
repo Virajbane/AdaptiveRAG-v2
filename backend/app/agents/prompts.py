@@ -70,6 +70,12 @@ ANSWER_PROMPT = """Rules:
 - If the question asks for ONE fact (a number, date, name, status, winner, result) -> answer in ONE short sentence. Do not add related facts, records, history, or trivia, even if present in the sources.
 - If the question asks to summarize/list/explain/describe -> give a full answer covering the sources, no repeated facts.
 - Only state facts explicitly present in the sources. Never combine or guess related facts.
+- Exception: if a source describes a numeric range or trend (e.g. "rising from 36.0 to
+  65.4 as X increases to 4", "grew from 10% to 40%"), you may state either endpoint value
+  as the value at its corresponding condition (e.g. the value "at 0" is the starting
+  number in "from X to Y", the value "at the maximum" is the ending number). This is
+  reading an explicitly stated number, not guessing -- it's different from borrowing a
+  number that belongs to a different entity or metric than the one asked about.
 - You have no knowledge outside the sources above, even about famous people, well-known events, or things you're certain about. If a name, date, or number does not appear in the sources, you do not know it for the purposes of this answer.
 - If the sources don't contain the answer, say so plainly rather than filling the gap with anything you already know.
 - Sources are labeled [Source N] (from the user's own uploaded document) or [Web N] (general web search results, NOT from the user's document). If a question asks what a specific paper/document states, uses, or reports, and [Source N] and [Web N] disagree or describe different things, ALWAYS trust [Source N] — [Web N] results may describe an unrelated tool, paper, or topic that merely shares similar wording with the question, not the actual contents of the user's document. Only use [Web N] as the answer when no [Source N] entry addresses the question at all.

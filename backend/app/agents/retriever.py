@@ -94,6 +94,30 @@ def _is_table_row_chunk(doc: dict) -> bool:
     return bool(_TABLE_ROW_PATTERN.match(doc.get("text", "")))
 
 
+# --- NEW: range/trend annotation -----------------------------------
+_RANGE_RE = re.compile(
+    r'(?:from|rising from|surging from|grew from|increas\w* from)\s+'
+    r'([\d.]+)\s*(?:%|)\s*to\s+([\d.]+)\s*(?:%|)\s*(?:as|when|at|over)?\s*([^.,]*)',
+    re.IGNORECASE,
+)
+
+
+def _annotate_ranges(text: str) -> str:
+    matches = _RANGE_RE.findall(text)
+    if not matches:
+        return text
+    annotations = []
+    for start, end, condition in matches:
+        condition = condition.strip()
+        annotations.append(
+            f"[Note: stated explicitly in the source — the value is {start} "
+            f"at the starting/lowest point (i.e. before {condition} has occurred, "
+            f"often meaning zero), and rises to {end} at the point where {condition}.]"
+        )
+    return text + "\n" + "\n".join(annotations)
+# ---------------------------------------------------------------------
+
+
 def _rerank_key(doc: dict) -> float:
     """Sort key for narrowing candidates back down. Prefers rerank_score
     (the BGE cross-encoder score, which is what actually determines real
@@ -201,12 +225,19 @@ class RetrieverAgent(BaseAgent):
                 )
                 remaining_slots = max(FINAL_CONTEXT_SIZE - len(row_chunks), 0)
                 results = row_chunks + other_chunks[:remaining_slots]
-                # Preserve overall rerank ordering in the final list so
-                # downstream consumers that assume results[0] is "best"
-                # still see something reasonable at the top.
                 results = sorted(results, key=_rerank_key, reverse=True)
             else:
                 results = candidates
+
+            # NEW: annotate range/trend statements so AnswerAgent can read
+            # endpoint values directly instead of having to infer them
+            for doc in results:
+                doc["text"] = _annotate_ranges(doc["text"])
+
+            print(f"[DEBUG-RANGE] annotate_ranges was called on {len(results)} chunks")  # <-- add this line
+            for doc in results:
+                if "[Note:" in doc["text"]:
+                    print(f"[DEBUG-RANGE] MATCH FOUND: ...{doc['text'][-200:]}")
 
             await self._attach_filenames(results)
 

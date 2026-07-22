@@ -240,8 +240,16 @@ async def run_answer_eval(
 
     print(f"[RAW ANSWER] {item['id']}: {answer_text!r}")
 
-    retrieved = await hybrid_engine.search(query=item["question"], user_id=user_id, top_k=6)
-    context_text = "\n\n".join(r["text"] for r in retrieved)
+    # ---- REPLACE THESE TWO LINES ----
+    # retrieved = await hybrid_engine.search(query=item["question"], user_id=user_id, top_k=6)
+    # context_text = "\n\n".join(r["text"] for r in retrieved)
+    # ---- WITH ----
+    actual_retrieved_docs = (
+        state.get("retrieved_docs", []) if isinstance(state, dict)
+        else getattr(state, "retrieved_docs", [])
+    )
+    context_text = "\n\n".join(r["text"] for r in actual_retrieved_docs)
+    # ----------------------------------
 
     expected_keywords = item.get("expected_answer_contains", [])
     answer_lower = answer_text.lower()
@@ -264,7 +272,6 @@ async def run_answer_eval(
         false_decline=false_decline,
         latency_s=latency,
     )
-
 
 def print_report(retrieval_results, answer_results, cache_summary, ingestion_report, top_k: int):
     print("\n" + "=" * 60)

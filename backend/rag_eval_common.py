@@ -66,10 +66,32 @@ from typing import List, Optional, Dict, Any, Union
 # Entity-attribution check (moved here from eval_rag.py, unchanged logic)
 # ---------------------------------------------------------------------------
 
+# 2026-07-22 fix: added "in", "at", "on", "not", "with", "as", "of", "to",
+# "for" -- generic connector words that get capitalized purely by sitting
+# at the start of a question sentence (e.g. "In the layer ablation
+# study..."), not because they're real named entities. Confirmed root
+# cause of false entity-attribution flags on fab_10 ("In" and "Figure"
+# were being treated as anchor entities, and since neither ever appears
+# near the answer's numbers in context, every number in a correct answer
+# got flagged as a mismatch). Deliberately NOT stripping "Figure"/"Table"
+# here -- those ARE legitimate discriminating entities for table/figure
+# -scoped questions elsewhere in the golden set.
 _QUESTION_STOPWORDS = {
     "how", "what", "which", "who", "whom", "when", "where", "why",
     "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
+    "in", "at", "on", "not", "with", "as", "of", "to", "for",
 }
+
+# 2026-07-22 fix: excludes digits embedded inside hyphenated/alphanumeric
+# identifiers (e.g. "Step-Audio-2", "GPT-5-Duplex") -- those aren't
+# factual claims to verify, they're part of a proper noun. This mirrors
+# the identical fix already applied in app/agents/answer.py's _NUM_RE;
+# this eval-side copy had drifted and was missing it, causing a false
+# entity-attribution flag on fab_02 (the "2" in "Step-Audio-2" was
+# treated as an unverified numeric claim). Kept as a separate constant
+# here rather than importing from app.agents.answer, since this module
+# is meant to have zero dependency on the app's internal agent code.
+_NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
 
 
 def numeric_claims_entity_mismatches(answer: str, context: str, question: str) -> List[str]:
@@ -81,7 +103,7 @@ def numeric_claims_entity_mismatches(answer: str, context: str, question: str) -
     against (deliberately sits out rather than false-flagging plain
     non-entity questions like "how many layers").
     """
-    numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
+    numbers_in_answer = _NUM_RE.findall(answer)
     if not numbers_in_answer:
         return []
 
@@ -118,7 +140,7 @@ def entity_attribution_pass(answer: str, context: str, question: str) -> Optiona
     """Convenience wrapper for the standalone metric: True = no mismatch
     detected (pass), False = at least one number attributed to the wrong
     entity (fail), None = check didn't apply (no entity in question)."""
-    numbers_in_answer = re.findall(r"\d+\.\d+|\d+", answer)
+    numbers_in_answer = _NUM_RE.findall(answer)
     entities = [
         e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
         if e.lower() not in _QUESTION_STOPWORDS

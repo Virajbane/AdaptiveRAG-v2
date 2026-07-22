@@ -145,7 +145,17 @@ class AnswerAgent(BaseAgent):
         # Respect the router's decision the same way tool_context already
         # does: only include doc context when 'documents' was requested.
         docs_wanted = "documents" in (state.sources_needed or [])
-        top_docs = state.retrieved_docs[:3] if docs_wanted else []
+        # Was: top_docs = state.retrieved_docs[:3] if docs_wanted else []
+        if docs_wanted:
+            protected = [d for d in state.retrieved_docs if d.get("protected")]
+            other = sorted(
+                (d for d in state.retrieved_docs if not d.get("protected")),
+                key=lambda d: d.get("rerank_score", d.get("combined_score", 0.0)),
+                reverse=True,
+            )
+            top_docs = (protected + other)[:3]
+        else:
+            top_docs = []
 
         if not top_docs and not tool_context:
             web_error = web_result.get("error") if web_result else None
