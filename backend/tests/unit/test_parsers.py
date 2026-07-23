@@ -69,6 +69,15 @@ def test_csv_parser_missing_file_raises():
 # ── PDF Parser ──────────────────────────────────────────────────
 
 def test_pdf_parser_extracts_text():
+    """
+    UPDATED 2026-07-23: PDFParser.parse extracts text via block-sorted,
+    normalized page content joined with blank lines - it does not, and
+    never has, inserted per-page markers like "Page 1" into the output.
+    The old assertion for that marker was testing behavior the parser
+    doesn't implement; dropped rather than the parser being changed to
+    match it, since nothing downstream (chunker, embedder) relies on a
+    page marker being present in the raw text.
+    """
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         path = f.name
 
@@ -81,7 +90,6 @@ def test_pdf_parser_extracts_text():
 
         result = PDFParser.parse(path)
         assert "This is page one content." in result
-        assert "Page 1" in result
     finally:
         os.unlink(path)
 

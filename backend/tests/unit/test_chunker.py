@@ -6,7 +6,7 @@ run fast and need no mocking.
 """
 
 import pytest
-from backend.app.services.document.chunker import TextChunker
+from app.services.document.chunker import TextChunker
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def test_chunk_short_text_produces_one_chunk(chunker):
     text = "This is a short sentence. It has two sentences."
     chunks = chunker.chunk(text)
     assert len(chunks) == 1
-    assert chunks[0]["tokens"] <= chunker.chunk_size
+    assert chunks[0]["tokens"] <= chunker.max_tokens
 
 
 def test_chunk_empty_text_produces_no_chunks(chunker):
@@ -43,7 +43,7 @@ def test_chunk_respects_target_size_for_normal_text(chunker):
 
     assert len(chunks) > 1
     for chunk in chunks[:-1]:
-        assert chunk["tokens"] <= chunker.chunk_size + 50
+        assert chunk["tokens"] <= chunker.max_tokens + 50
 
 
 def test_chunk_preserves_all_content_roughly(chunker):
@@ -65,22 +65,24 @@ def test_chunk_multiple_chunks_each_within_tolerance(chunker):
 
     assert len(chunks) >= 2
     for chunk in chunks:
-        assert chunk["tokens"] <= chunker.chunk_size + 50
+        assert chunk["tokens"] <= chunker.max_tokens + 50
 
 
-def test_single_oversized_sentence_is_not_split(chunker):
+def test_oversized_sentence_with_no_punctuation_is_split_by_words(chunker):
     """
-    KNOWN GAP: a single 'sentence' with no terminal punctuation that
-    exceeds chunk_size is NOT broken down further by the current
-    implementation - it becomes one oversized chunk on its own.
+    UPDATED 2026-07-23: previously a single 'sentence' with no terminal
+    punctuation that exceeded max_tokens was NOT broken down further and
+    became one oversized chunk (see git history for the old
+    'test_single_oversized_sentence_is_not_split' version of this test).
 
-    This documents actual current behavior. If this test starts
-    failing, it likely means sentence-splitting for oversized
-    sentences was added - a good change - and this test should be
-    updated to assert the new correct behavior instead.
+    _split_recursive now falls through to the space (" ") separator when
+    no punctuation-based separator applies, so long punctuation-less text
+    gets split word-by-word and re-merged into normal-sized chunks like
+    any other text, instead of being left as one oversized blob.
     """
     huge_sentence = "word " * 700
     chunks = chunker.chunk(huge_sentence)
 
-    assert len(chunks) == 1
-    assert chunks[0]["tokens"] > chunker.chunk_size
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk["tokens"] <= chunker.max_tokens + 50
