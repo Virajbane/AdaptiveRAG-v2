@@ -71,10 +71,13 @@ class TestVectorSearchEngine:
     # --- search() ---
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_search_embeds_query_first(self, vector_engine):
         vector_engine._mock_db.search = AsyncMock(return_value=[])
         await vector_engine.search("what is revenue", "user1", top_k=5)
-        vector_engine._mock_embedder.embed_text.assert_awaited_once_with("what is revenue")
+        vector_engine._mock_embedder.embed_text.assert_awaited_once_with(
+            "what is revenue", task="search_query"
+        )
 
     @pytest.mark.asyncio
     async def test_search_passes_embedding_to_qdrant(self, vector_engine):
@@ -88,6 +91,7 @@ class TestVectorSearchEngine:
             query_vector=fake_embedding,
             user_id="user1",
             top_k=3,
+            document_id=None,
         )
 
     @pytest.mark.asyncio
@@ -166,16 +170,22 @@ class TestHybridSearchEngine:
 
     @pytest.mark.asyncio
     async def test_vector_engine_receives_correct_args(self, hybrid_engine):
+        """
+        HybridSearchEngine always fetches a fixed 20-candidate pool from
+        each engine internally, regardless of the top_k the caller asked
+        for — top_k only affects the final slice after fusion/reranking.
+        document_id is forwarded through for document-scoped retrieval.
+        """
         await hybrid_engine.search("revenue Q3", "user1", top_k=5)
         hybrid_engine._mock_vector.search.assert_awaited_once_with(
-            "revenue Q3", "user1", top_k=10
+            "revenue Q3", "user1", top_k=20, document_id=None
         )
 
     @pytest.mark.asyncio
     async def test_keyword_engine_receives_correct_args(self, hybrid_engine):
         await hybrid_engine.search("revenue Q3", "user1", top_k=5)
         hybrid_engine._mock_keyword.search.assert_awaited_once_with(
-            "user1", "revenue Q3", top_k=10
+            "user1", "revenue Q3", top_k=20, document_id=None
         )
 
     @pytest.mark.asyncio
@@ -196,58 +206,68 @@ class TestHybridSearchEngine:
         results = await hybrid_engine.search("query", "user1", top_k=3)
         assert len(results) <= 3
 
-    # --- _combine_results() ---
+    # --- _reciprocal_rank_fusion() ---
+    # 2026-xx-xx: renamed from _combine_results, weighted scoring (score *
+    # vector_weight + score * keyword_weight) replaced with Reciprocal Rank
+    # Fusion — score(d) = sum(1 / (RRF_K + rank + 1)) across whichever
+    # result list(s) a chunk appears in. RRF is rank-based, not magnitude-
+    # based, so there are no weight params anymore — see class docstring.
 
-    def test_combine_vector_only(self, hybrid_engine):
+    def test_rrf_vector_only(self, hybrid_engine):
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "text", "score": 0.8, "search_type": "vector"},
         ]
-        combined = hybrid_engine._combine_results(vector_results, [], 0.6, 0.4)
-        assert len(combined) == 1
-        r = combined[0]
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, [])
+        assert len(fused) == 1
+        r = fused[0]
         assert r["vector_score"] == 0.8
         assert r["keyword_score"] == 0
-        assert pytest.approx(r["combined_score"]) == 0.8 * 0.6
+        assert pytest.approx(r["combined_score"]) == 1 / (60 + 0 + 1)
 
-    def test_combine_keyword_only(self, hybrid_engine):
+    def test_rrf_keyword_only(self, hybrid_engine):
         keyword_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "text", "score": 5.0, "search_type": "keyword"},
         ]
-        combined = hybrid_engine._combine_results([], keyword_results, 0.6, 0.4)
-        assert len(combined) == 1
-        r = combined[0]
+        fused = hybrid_engine._reciprocal_rank_fusion([], keyword_results)
+        assert len(fused) == 1
+        r = fused[0]
         assert r["vector_score"] == 0
         assert r["keyword_score"] == 5.0
-        assert pytest.approx(r["combined_score"]) == 5.0 * 0.4
+        assert pytest.approx(r["combined_score"]) == 1 / (60 + 0 + 1)
 
-    def test_combine_same_chunk_both_engines(self, hybrid_engine):
-        """A chunk appearing in both result sets must be merged, not duplicated."""
+    def test_rrf_same_chunk_both_engines_sums_contributions(self, hybrid_engine):
+        """A chunk appearing in both lists at rank 0 gets a contribution
+        from each list — merged, not duplicated."""
         shared_chunk = {"doc_id": "doc1", "chunk_index": 0, "text": "text"}
         vector_results = [{**shared_chunk, "score": 0.8, "search_type": "vector"}]
         keyword_results = [{**shared_chunk, "score": 3.0, "search_type": "keyword"}]
 
-        combined = hybrid_engine._combine_results(vector_results, keyword_results, 0.6, 0.4)
-        assert len(combined) == 1
-        r = combined[0]
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, keyword_results)
+        assert len(fused) == 1
+        r = fused[0]
         assert r["vector_score"] == 0.8
         assert r["keyword_score"] == 3.0
-        assert pytest.approx(r["combined_score"]) == (0.8 * 0.6) + (3.0 * 0.4)
+        expected = 1 / (60 + 0 + 1) + 1 / (60 + 0 + 1)
+        assert pytest.approx(r["combined_score"]) == expected
 
-    def test_combine_different_chunks_both_present(self, hybrid_engine):
-        """Chunks exclusive to each engine must both appear in the combined output."""
+    def test_rrf_different_chunks_both_present(self, hybrid_engine):
+        """Chunks exclusive to each engine must both appear in the fused output."""
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "v only", "score": 0.9, "search_type": "vector"},
         ]
         keyword_results = [
             {"doc_id": "doc2", "chunk_index": 1, "text": "k only", "score": 4.0, "search_type": "keyword"},
         ]
-        combined = hybrid_engine._combine_results(vector_results, keyword_results, 0.6, 0.4)
-        assert len(combined) == 2
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, keyword_results)
+        assert len(fused) == 2
 
-    def test_combine_clips_negative_keyword_scores(self, hybrid_engine):
+    def test_rrf_clips_negative_keyword_scores_in_displayed_score_only(self, hybrid_engine):
         """
-        BM25 can return slightly negative scores. _combine_results() clips them
-        to 0 so a weak keyword match never penalises the combined score.
+        BM25 can return slightly negative scores. keyword_score is clipped
+        to 0 for display, but RRF's combined_score is rank-based, not
+        magnitude-based — the negative underlying score doesn't reduce
+        combined_score at all, since a list contributes 1/(k+rank+1)
+        purely by virtue of the chunk appearing in that list.
         """
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "text", "score": 0.7, "search_type": "vector"},
@@ -255,11 +275,22 @@ class TestHybridSearchEngine:
         keyword_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "text", "score": -0.5, "search_type": "keyword"},
         ]
-        combined = hybrid_engine._combine_results(vector_results, keyword_results, 0.6, 0.4)
-        r = combined[0]
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, keyword_results)
+        r = fused[0]
         assert r["keyword_score"] == 0
-        # combined_score must not be reduced by the negative keyword score
-        assert pytest.approx(r["combined_score"]) == 0.7 * 0.6
+        expected = 1 / (60 + 0 + 1) + 1 / (60 + 0 + 1)
+        assert pytest.approx(r["combined_score"]) == expected
+
+    def test_rrf_lower_rank_contributes_less(self, hybrid_engine):
+        """Sanity check on the RRF formula itself: a chunk at rank 1 in
+        the vector list must score lower than one at rank 0."""
+        vector_results = [
+            {"doc_id": "doc1", "chunk_index": 0, "text": "first", "score": 0.9, "search_type": "vector"},
+            {"doc_id": "doc2", "chunk_index": 0, "text": "second", "score": 0.8, "search_type": "vector"},
+        ]
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, [])
+        by_id = {r["doc_id"]: r["combined_score"] for r in fused}
+        assert by_id["doc1"] > by_id["doc2"]
 
     # --- _deduplicate() and known gap ---
 
@@ -276,14 +307,10 @@ class TestHybridSearchEngine:
         """
         KNOWN GAP: _deduplicate() is dead code in normal operation.
 
-        _combine_results() builds a dict keyed by 'doc_id:chunk_index', which
-        already ensures each chunk appears at most once. Any result passing
-        through _combine_results() cannot contain true duplicates, so
-        _deduplicate() will always be a no-op.
-
-        This test confirms the gap: feeding _combine_results() a vector result
-        and a keyword result for the *same* chunk produces exactly 1 entry —
-        the deduplication already happened inside _combine_results().
+        _reciprocal_rank_fusion() builds a dict keyed by
+        'doc_id:chunk_index', which already ensures each chunk appears at
+        most once. Any result passing through fusion cannot contain true
+        duplicates, so _deduplicate() will always be a no-op.
         """
         vector_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "t", "score": 0.8, "search_type": "vector"},
@@ -291,47 +318,35 @@ class TestHybridSearchEngine:
         keyword_results = [
             {"doc_id": "doc1", "chunk_index": 0, "text": "t", "score": 2.0, "search_type": "keyword"},
         ]
-        combined = hybrid_engine._combine_results(vector_results, keyword_results, 0.6, 0.4)
-        # Already deduplicated — _deduplicate() receives 1 item and returns 1 item
-        assert len(combined) == 1
-        deduped = hybrid_engine._deduplicate(combined)
+        fused = hybrid_engine._reciprocal_rank_fusion(vector_results, keyword_results)
+        assert len(fused) == 1
+        deduped = hybrid_engine._deduplicate(fused)
         assert len(deduped) == 1
 
-    # --- weight customisation ---
+    # --- weight kwargs removed ---
 
     @pytest.mark.asyncio
-    async def test_custom_weights_applied(self, hybrid_engine):
-        """Non-default weights must flow through to combined_score."""
-        # Single-candidate pool: reranking a pool of size 1 can't reorder
-        # anything, but it CAN overwrite/add a rerank_score - it does not
-        # touch combined_score, which is what this test asserts on, so no
-        # need to disable the reranker here. Documented for clarity since
-        # the test below this one does need to disable it.
-        vector_results = [
-            {"doc_id": "doc1", "chunk_index": 0, "text": "t", "score": 1.0, "search_type": "vector"},
-        ]
-        hybrid_engine._mock_vector.search = AsyncMock(return_value=vector_results)
-
-        results = await hybrid_engine.search(
-            "query", "user1", top_k=5,
-            vector_weight=0.8,
-            keyword_weight=0.2,
-        )
-        assert len(results) == 1
-        assert pytest.approx(results[0]["combined_score"]) == 1.0 * 0.8
+    async def test_search_no_longer_accepts_weight_kwargs(self, hybrid_engine):
+        """
+        RRF replaced weighted score combination — search() no longer
+        accepts vector_weight/keyword_weight at all. This documents the
+        removal explicitly rather than letting it fail silently/unnoticed.
+        """
+        with pytest.raises(TypeError):
+            await hybrid_engine.search(
+                "query", "user1", top_k=5,
+                vector_weight=0.8,
+                keyword_weight=0.2,
+            )
 
     # --- sorting ---
 
     @pytest.mark.asyncio
     async def test_results_ordered_by_combined_score_descending(self, hybrid_engine):
-        # This test verifies the combine/dedupe/sort-by-combined_score
-        # pipeline in isolation. Reranking (when the BGE model is
-        # available) intentionally reorders the final result by
-        # rerank_score instead, which is a deliberate behavior change
-        # from Phase 14 - covered by its own dedicated reranker test,
-        # not this one. Disabling it here keeps this test asserting on
-        # what it was always meant to verify: the pre-rerank combined
-        # score ordering produced by _combine_results/_deduplicate/sort.
+        # Reranking (when the BGE model is available) intentionally
+        # reorders by rerank_score instead — covered by its own dedicated
+        # reranker test, not this one. Disabling it here keeps this test
+        # asserting on the pre-rerank RRF/dedupe/sort pipeline only.
         hybrid_engine.reranker.available = False
 
         vector_results = [

@@ -13,8 +13,12 @@ import pytest_asyncio
 from app.services.cache.query_cache import query_cache
 from httpx import AsyncClient, ASGITransport
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+load_dotenv()  # pulls in project root .env, including MONGO_PASSWORD
 
 from app.main import app
+import os
+   
 import app.db.mongodb.client as mongo_client_module
 
 @pytest_asyncio.fixture(autouse=True)
@@ -36,9 +40,12 @@ async def clear_query_cache():
     yield
     await query_cache.clear()
 
-TEST_MONGO_URL = "mongodb://admin:password123@localhost:27017/rag_db_test?authSource=admin"
+BASE_MONGODB_URL = os.getenv("MONGODB_URL")
 TEST_DB_NAME = "rag_db_test"
 
+# Reuse the real connection string (same host/user/password/authSource),
+# just point the path at the test database instead of production's.
+TEST_MONGO_URL = BASE_MONGODB_URL.rsplit("/", 1)[0] + f"/{TEST_DB_NAME}?authSource=admin"
 
 @pytest_asyncio.fixture(scope="function")
 async def test_db():
