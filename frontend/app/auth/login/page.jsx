@@ -66,7 +66,7 @@ export default function LoginPage() {
         
       });
 
-      const redirect = searchParams.get('redirect') || '/dashboard/chat';
+      const redirect = searchParams.get('redirect') || '/dashboard';
       router.push(redirect);
     } catch (err) {
       setError(err.message || 'Login failed');
