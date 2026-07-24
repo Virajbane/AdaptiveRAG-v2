@@ -36,7 +36,7 @@ Design notes:
   node needs to change — AnswerAgent, the source-card builder, etc. all
   keep reading state.retrieved_docs exactly as before.
 
-2026-07-04 addition — ABSOLUTE floor:
+2026-07-04 addition — ABSOLUTE floor (soft signal, not a gate):
   Eval against a real arXiv paper surfaced a gap the relative floor can't
   catch: a query ("What is the full title of this paper?") where EVERY
   retrieved chunk was weak in absolute terms (top_score=0.0970, next
@@ -45,27 +45,51 @@ Design notes:
   correctly keeps all 5 chunks (they're all within 2% of *each other*
   relative to the top), because relative filtering has no way to know
   the whole batch is weak — it can only compare chunks to each other,
-  not to some notion of "good enough to actually answer with." The
-  result: AnswerAgent received confidently-worded but irrelevant
-  reference-list text with no signal that retrieval itself had failed,
-  and (before the model-tier fix) filled the gap with fabricated
-  content instead.
+  not to some notion of "good enough to actually answer with."
 
-  ABSOLUTE_FLOOR is a second, independent check: if even the TOP chunk
-  scores below this floor, the whole batch is flagged as low-confidence
-  by prepending a short, explicit warning to the top chunk's own text
-  (not a synthetic fake chunk — mutating a copy of a real, already-
-  cited chunk keeps the "Sources Cited" UI accurate, since it's still
-  a genuine retrieved source, just a weak one). This works together
-  with ANSWER_PROMPT's existing instruction ("if the sources don't
-  contain the answer, say so") to nudge the model toward an honest
-  "not found in the document" instead of confidently guessing.
+  ABSOLUTE_FLOOR is a second, independent check: if the TOP chunk scores
+  below this floor, the batch is flagged as low-confidence by prepending
+  a short, explicit warning to the top chunk's own text (mutating a copy
+  of a real, already-cited chunk, not a synthetic fake one, keeps the
+  "Sources Cited" UI accurate — it's still a genuine retrieved source,
+  just a weak one).
 
-  0.05 is a starting estimate for the BGE cross-encoder's typical
-  output range observed in this pipeline's logs (weak matches cluster
-  well under 0.05, plausible matches so far have been seen in the
-  0.1-0.3+ range) — tune based on continued eval observations rather
-  than treating it as precisely calibrated.
+  0.05 is a starting estimate for the BGE cross-encoder's typical output
+  range observed in this pipeline's logs — tune based on continued eval
+  observations rather than treating it as precisely calibrated.
+
+2026-07-25 fix — ABSOLUTE_FLOOR is no longer a hard gate before generation:
+  QA against the resume test doc surfaced the real cost of the previous
+  hard-stop: "What CGPA did Viraj get?" (top_score=0.0038, explicit answer
+  "CGPA 8.1" present in the doc), "What certifications does Viraj hold?"
+  (top_score=0.0038), and "Which project was built most recently?"
+  (top_score=0.0012) were all rejected before AnswerAgent ever ran. Root
+  cause: short factual chunks (a single number, a header, a date) score
+  low against a conversationally-phrased question not because the answer
+  is absent, but because the embedding model doesn't reward that kind of
+  chunk highly — cosine/rerank similarity can't distinguish "no answer
+  exists" from "answer exists but the chunk is naturally low-signal."
+
+  The floor no longer skips generation. Below ABSOLUTE_FLOOR, the batch
+  is annotated with LOW_CONFIDENCE_NOTE (as it already was) and passed
+  through to AnswerAgent like any other batch, which is the layer with
+  the actual context to make an absence call. The real "is this
+  answerable" decision has moved to AnswerAgent's grounding instruction
+  + CriticAgent's grounding check downstream — that combination has
+  already proven reliable in eval logs (correctly declined an
+  unverifiable number in a separate case) and is a better signal than
+  chunk-level cosine similarity for short factual content. This costs a
+  generate() + critic round trip on genuinely-empty retrievals that the
+  old hard-stop would have short-circuited faster, but that's the right
+  trade: a few extra seconds on true negatives beats confidently
+  discarding true positives.
+
+  state.low_confidence replaces the generation-skipping use of
+  state.retrieval_rejected. retrieval_rejected is now reserved for the
+  only case where there is truly nothing to forward (no chunks at all).
+  NOTE: state.low_confidence needs to exist as a field on AgentState —
+  add it if it isn't there yet (bool, default False). Verify the
+  "[GRADER] Low confidence" log line appears during testing.
 
 2026-07-04 addition — BIDIRECTIONAL source override:
   PDF eval logs showed the Planner defaulting to including 'web' in
@@ -95,6 +119,22 @@ Design notes:
   silently no-op (AttributeError swallowed via getattr) rather than
   crash, so verify the [GRADER] override log line actually appears
   during testing rather than assuming it's active.
+
+2026-07-05 addition — two-tier override:
+  A single 0.5 threshold for BOTH "should documents be included at all"
+  and "should web be dropped" turned out to be doing two different jobs
+  with one number. Eval logs surfaced two confirmed wrong answers
+  (correct model: GPT-2, answered: "DBRX, Llama 2 70B, Mistral Large";
+  correct tool: WhisperX, answered: "Reverb models from Rev") where the
+  real, relevant document chunk scored 0.30 and 0.37 - genuinely
+  on-topic, well below noise, but under 0.5 - so it was never added to
+  sources_needed at all, and web fully displaced it. ADD_DOCUMENTS_
+  THRESHOLD is a much lower bar (roughly 3x the Grader's own
+  ABSOLUTE_FLOOR of 0.05) for "this is a real signal worth including
+  alongside web," while DOC_CONFIDENCE_OVERRIDE stays the higher bar
+  for "this is strong enough that web can be dropped entirely" - the
+  two failure modes (missing content vs. contaminating noise) need
+  different bars, not one compromise value.
 """
 
 from app.agents.base import BaseAgent
@@ -102,25 +142,9 @@ from app.agents.state import AgentState
 
 RELATIVE_FLOOR = 0.02   # keep chunks scoring >= 2% of the top chunk's score
 MIN_KEEP = 3             # always keep at least this many chunks if any exist
-ABSOLUTE_FLOOR = 0.05    # flag the whole batch as low-confidence below this
+ABSOLUTE_FLOOR = 0.05    # flag the whole batch as low-confidence below this (soft signal, not a gate)
 DOC_CONFIDENCE_OVERRIDE = 0.5  # top score at/above this = documents alone are trustworthy
-
-# 2026-07-05 addition — two-tier override:
-# A single 0.5 threshold for BOTH "should documents be included at all"
-# and "should web be dropped" turned out to be doing two different jobs
-# with one number. Eval logs surfaced two confirmed wrong answers
-# (correct model: GPT-2, answered: "DBRX, Llama 2 70B, Mistral Large";
-# correct tool: WhisperX, answered: "Reverb models from Rev") where the
-# real, relevant document chunk scored 0.30 and 0.37 - genuinely
-# on-topic, well below noise, but under 0.5 - so it was never added to
-# sources_needed at all, and web fully displaced it. ADD_DOCUMENTS_
-# THRESHOLD is a much lower bar (roughly 3x the Grader's own
-# ABSOLUTE_FLOOR of 0.05) for "this is a real signal worth including
-# alongside web," while DOC_CONFIDENCE_OVERRIDE stays the higher bar
-# for "this is strong enough that web can be dropped entirely" - the
-# two failure modes (missing content vs. contaminating noise) need
-# different bars, not one compromise value.
-ADD_DOCUMENTS_THRESHOLD = 0.15
+ADD_DOCUMENTS_THRESHOLD = 0.15  # top score at/above this = real signal worth including alongside web
 
 LOW_CONFIDENCE_NOTE = (
     "[RETRIEVAL NOTE: This chunk scored very low relevance for the "
@@ -141,10 +165,16 @@ class GraderAgent(BaseAgent):
     """
     Drops retrieved chunks that are far weaker than the best match for
     this query, before they reach AnswerAgent. See module docstring.
+
+    Does NOT decide "answerable or not" anymore — that call belongs to
+    AnswerAgent (grounded generation) + CriticAgent (grounding check),
+    which have the actual context to make it. This agent only trims
+    noise and flags low-confidence batches for those downstream agents.
     """
 
     async def _execute(self, state: AgentState) -> AgentState:
         docs = state.retrieved_docs
+        state.low_confidence = False
 
         if not docs:
             print("[GRADER] No retrieved docs to grade — skipping")
@@ -155,8 +185,10 @@ class GraderAgent(BaseAgent):
         top_score = max(score for _, score in scored)
 
         if top_score <= 0:
-            print("[GRADER] Top score is 0 — no filtering applied")
-            state.retrieval_rejected = True
+            print("[GRADER] Top score is 0 — no relative filtering possible, "
+                  "flagging low-confidence and forwarding all chunks as-is")
+            state.low_confidence = True
+            state.retrieval_rejected = False
             return state
 
         threshold = top_score * RELATIVE_FLOOR
@@ -173,11 +205,6 @@ class GraderAgent(BaseAgent):
             print(f"[GRADER] Kept all {len(docs)} chunks (top_score={top_score:.4f})")
 
         # ── Bidirectional source override ──
-        # Runs before the absolute-floor check below: only meaningful when
-        # doc confidence is high, and the absolute floor path only fires
-        # when doc confidence is low — the two are mutually exclusive in
-        # practice, but keeping this first means retrieval_rejected can
-        # never leave a stale 'web'-only sources_needed behind it.
         sources = getattr(state, "sources_needed", None)
         if sources is not None and top_score >= ADD_DOCUMENTS_THRESHOLD:
             changed = False
@@ -185,11 +212,6 @@ class GraderAgent(BaseAgent):
                 sources.append("documents")
                 changed = True
 
-            # Only drop web at the HIGHER bar — a moderate doc score
-            # (ADD_DOCUMENTS_THRESHOLD <= top_score < DOC_CONFIDENCE_OVERRIDE)
-            # means real content exists but isn't necessarily complete
-            # enough to stand alone; keep web alongside it rather than
-            # excluding either source. See 2026-07-05 note above.
             if top_score >= DOC_CONFIDENCE_OVERRIDE and "web" in sources:
                 sources.remove("web")
                 changed = True
@@ -200,27 +222,19 @@ class GraderAgent(BaseAgent):
                       f"— sources_needed set to {sources}")
             state.sources_needed = sources
 
-        # ── Absolute floor check (2026-07-04, hard-stop added 2026-07-04) ──
-        # Previously this only annotated the top chunk with a warning note
-        # and let AnswerAgent try anyway — which meant every genuinely
-        # unanswerable query still cost a full answer+critic round trip
-        # (~15-20s in this pipeline's logs) before arriving at "not found",
-        # and left a residual hallucination risk if the model ignored the
-        # warning note (observed: Q1 still fabricated a fake thesis title
-        # even with the note present, before the model-tier fix).
-        #
-        # Now: below ABSOLUTE_FLOOR, skip generation entirely. The router
-        # checks state.retrieval_rejected and returns a direct "not found"
-        # response without calling AnswerAgent or CriticAgent at all. This
-        # is strictly safer (zero chance of the LLM overriding the warning)
-        # and faster (no wasted generate() calls on data we already know
-        # is noise).
+        # ── Absolute floor check — soft signal only, no longer skips generation ──
+        # Short factual chunks (a number, a header, a date) can legitimately
+        # score below ABSOLUTE_FLOOR while still containing the correct
+        # answer, so this no longer short-circuits to "not found." Instead:
+        # annotate the top kept chunk with a warning and let AnswerAgent /
+        # CriticAgent make the real absence call with actual context.
         if top_score < ABSOLUTE_FLOOR:
             print(f"[GRADER] Top score {top_score:.4f} below absolute floor "
-                  f"{ABSOLUTE_FLOOR} — rejecting retrieval, skipping generation")
-            state.retrieval_rejected = True
-            state.retrieved_docs = kept
-            return state
+                  f"{ABSOLUTE_FLOOR} — flagging low-confidence, forwarding to AnswerAgent")
+            state.low_confidence = True
+            annotated_top = dict(kept[0])
+            annotated_top["text"] = LOW_CONFIDENCE_NOTE + annotated_top.get("text", "")
+            kept = [annotated_top] + kept[1:]
 
         state.retrieval_rejected = False
         state.retrieved_docs = kept
