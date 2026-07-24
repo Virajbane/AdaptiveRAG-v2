@@ -2,14 +2,24 @@
 
 // Chat view: message thread, sources-cited cards, typing indicator, composer.
 // Chat state and API logic now live in ChatContext — this file is a thin
-// consumer. It only owns UI-local state: the composer's textarea value
-// and its auto-resize behavior.
+// consumer. It only owns UI-local state: the composer's textarea value,
+// its auto-resize behavior, and the tag-shortcut buttons below it.
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/app/context/ChatContext';
 
 const INPUT_MIN_HEIGHT = 44;
 const INPUT_MAX_HEIGHT = 160;
+
+// Tag shortcut buttons shown below the composer. These just insert the
+// literal tag text at the front of the message -- actual parsing/routing
+// of leading tags happens server-side in PlannerAgent (_parse_leading_tags),
+// this is only a typing convenience + hover explainer, not the source of
+// truth for what a tag does.
+const TAG_INFO = {
+  '@web': 'Searches the web for this question, instead of your uploaded documents.',
+  '@sql': 'Runs this question against your connected database. (Coming soon)',
+};
 
 function useAutoResizeTextarea() {
   const ref = useRef(null);
@@ -30,6 +40,7 @@ function useAutoResizeTextarea() {
 export default function ChatView({ documentCount = 0 }) {
   const { messages, loading, elapsed, sendMessage, cancelMessage } = useChat();
   const [input, setInput] = useState('');
+  const [hoveredTag, setHoveredTag] = useState(null);
   const messagesEndRef = useRef(null);
   const { textareaRef, adjustHeight } = useAutoResizeTextarea();
 
@@ -44,6 +55,31 @@ export default function ChatView({ documentCount = 0 }) {
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  const handleTagClick = (tag) => {
+    const trimmed = input.trimStart();
+    const lower = trimmed.toLowerCase();
+    // Don't duplicate if this exact tag is already a leading tag.
+    // Simple check (only looks at the first couple of words) -- this is
+    // just a typing convenience, not a re-implementation of the backend's
+    // leading-tag parser.
+    const alreadyPresent = lower.split(/\s+/).some(
+      (w, i) => w === tag && i < 3
+    );
+    if (alreadyPresent) {
+      textareaRef.current?.focus();
+      return;
+    }
+    const next = trimmed ? `${tag} ${trimmed}` : `${tag} `;
+    setInput(next);
+    adjustHeight();
+    // Focus + place cursor at the end after React commits the new value.
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const len = textareaRef.current?.value.length ?? 0;
+      textareaRef.current?.setSelectionRange(len, len);
+    });
   };
 
   return (
@@ -114,6 +150,56 @@ export default function ChatView({ documentCount = 0 }) {
               </button>
             </div>
           </div>
+
+          {/* Tag shortcut buttons */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, paddingLeft: 4 }}>
+            {['@web', '@sql'].map(tag => (
+              <div key={tag} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => handleTagClick(tag)}
+                  onMouseEnter={() => setHoveredTag(tag)}
+                  onMouseLeave={() => setHoveredTag(null)}
+                  onFocus={() => setHoveredTag(tag)}
+                  onBlur={() => setHoveredTag(null)}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#b3b3b3',
+                    background: '#1f1f1f',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 9999,
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {tag.toUpperCase()}
+                </button>
+
+                {hoveredTag === tag && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '130%',
+                    left: 0,
+                    background: '#252525',
+                    color: '#e5e2e1',
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    width: 200,
+                    boxShadow: 'rgba(0,0,0,0.4) 0px 4px 12px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    zIndex: 10,
+                    pointerEvents: 'none',
+                  }}>
+                    {TAG_INFO[tag]}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
           <p style={{ textAlign: 'center', fontSize: 11, color: '#4d4d4d', marginTop: 8 }}>
             Shift + Enter for new line • Searching {documentCount} files in <span style={{ color: '#1ed760', cursor: 'pointer' }}>Project Alpha</span>
           </p>

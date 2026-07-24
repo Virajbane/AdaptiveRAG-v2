@@ -267,6 +267,22 @@ def build_agent_graph(db=None):
             "sources": [],
             "is_valid": True,
         }
+    async def sql_answer_node(state: AgentState) -> dict:
+        # SQL tool integration is still under construction (see planner.py).
+        # This mirrors metadata_answer_node's shape: answer directly from
+        # state.metadata_answer, skip retriever output / tool_agent / answer
+        # / critic entirely -- there's no real SQL execution yet, so there's
+        # nothing for those downstream nodes to meaningfully do.
+        placeholder = state.metadata_answer.get(
+            "placeholder", "SQL integration is under development."
+        )
+        print("[ROUTER] @sql tag detected, returning placeholder — skipping retrieval/answer/critic")
+        return {
+            "answer": placeholder,
+            "confidence_final": 1.0,   # not a guess -- this is the whole, correct answer
+            "sources": [],
+            "is_valid": True,
+        }
 
         # ── Routing functions ─────────────────────────────────────────────────
 
@@ -308,7 +324,18 @@ def build_agent_graph(db=None):
             print("[ROUTER] Metadata answer available → metadata_answer (skipping retrieval path)")
             return "metadata_answer"
 
-        if state.retrieval_rejected:
+        # 2026-07-XX: @sql tag detected by planner. SQL tool isn't wired up
+        # yet, so this routes to a placeholder response instead of falling
+        # through to the generic `if state.sources_needed:` branch below --
+        # without this check, ["sql"] is a non-empty list and would silently
+        # route to answer_node, discarding the placeholder in
+        # state.metadata_answer and generating an unrelated response from
+        # leftover retrieved_docs instead.
+        if "sql" in state.sources_needed:
+            print("[ROUTER] SQL tag detected → sql_answer (placeholder, SQL tool not yet implemented)")
+            return "sql_answer"
+
+        if state.retrieval_rejected and "documents" in state.sources_needed:
             print("[ROUTER] Retrieval rejected by grader → no_answer (skipping tool_agent/answer/critic)")
             return "no_answer"
 
@@ -372,7 +399,7 @@ def build_agent_graph(db=None):
     graph.add_node("critic",           critic_node)
     graph.add_node("no_answer",        no_answer_node)
     graph.add_node("metadata_answer",  metadata_answer_node)
-
+    graph.add_node("sql_answer",       sql_answer_node)
     graph.add_edge(START, "rewriter")
     graph.add_edge("rewriter", "planner")
     graph.add_edge("rewriter", "retriever")
@@ -390,6 +417,7 @@ def build_agent_graph(db=None):
             "answer":           "answer",
             "no_answer":        "no_answer",
             "metadata_answer":  "metadata_answer",
+            "sql_answer":       "sql_answer",
         },
     )
 
@@ -397,6 +425,7 @@ def build_agent_graph(db=None):
     graph.add_edge("answer",     "critic")
     graph.add_edge("no_answer",       END)
     graph.add_edge("metadata_answer", END)
+    graph.add_edge("sql_answer", END)
 
     graph.add_conditional_edges(
         "critic",
