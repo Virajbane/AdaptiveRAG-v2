@@ -114,6 +114,34 @@ Design notes:
         (_dropped_personal_reference) of not trusting prompt-only
         compliance from the fast model for anything consequential
         downstream.
+
+2026-07-25 fix (context-window overflow + orphaned summaries):
+  - History was previously fetched via short_term.get_history() and
+    hard-capped to the last MAX_HISTORY_TURNS (3) turns, with no check
+    on how many tokens those turns actually cost. If any one of those
+    3 turns was long (e.g. a detailed multi-fact AnswerAgent response),
+    the combined prompt (REWRITE_SYSTEM_PROMPT + history + question)
+    could silently exceed fast_llm's context window, with Ollama
+    truncating the prompt with no error and no signal anywhere in this
+    file. There was also no eval coverage of this at all — the golden
+    dataset has zero multi-turn conversations.
+  - Separately, MemoryManager.load_context() (which merges short-term
+    history with long-term session summaries) was never called by this
+    file — history was fetched directly from short_term, bypassing
+    summaries entirely. Combined with ShortTermMemory's hard 10-message
+    cap, this meant older conversation content was being permanently
+    dropped with no summary ever reaching this prompt, even though
+    LongTermMemory already had a working (but unused) summary-storage
+    method.
+  - Fix: switched to load_context() so summaries are actually included,
+    and replaced the fixed 3-turn cap with a token-budgeted selection
+    (_select_recent_history) that includes as many recent turns as fit
+    inside HISTORY_PROMPT_TOKEN_BUDGET, oldest-dropped-first. This
+    caps prompt size regardless of how long any individual turn is.
+    _matches_prior_turn below still checks against the FULL history
+    list (not just the token-trimmed subset used in the prompt itself),
+    since that safety check should compare against everything actually
+    stored, not just what fit in this particular prompt.
 """
 
 import re
@@ -121,6 +149,7 @@ import re
 import app.services.memory.manager as mm_module
 from app.agents.base import BaseAgent
 from app.agents.state import AgentState
+from app.services.memory.token_utils import estimate_tokens
 
 REWRITE_SYSTEM_PROMPT = """Rewrite the question as one standalone, well-formed question.
 
@@ -154,7 +183,13 @@ WRONG Output: "Who is the most successful driver among the top five drivers of a
 RIGHT Output: "Who won the most recent Formula 1 race?"
 """
 
-MAX_HISTORY_TURNS = 3
+# 2026-07-25: replaced the old fixed MAX_HISTORY_TURNS=3 cap with a
+# token-budgeted selection. ~800 tokens is a conservative slice of
+# fast_llm's 2048-token default context window: REWRITE_SYSTEM_PROMPT
+# itself runs roughly 400 tokens, plus the current question and
+# formatting overhead, leaving this as the safe remaining share for
+# prior-turn context specifically.
+HISTORY_PROMPT_TOKEN_BUDGET = 800
 
 _PERSONAL_REF = re.compile(r"\b(my|i|me)\b", re.IGNORECASE)
 _QUANTIFIER_RE = re.compile(r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b", re.IGNORECASE)
@@ -192,15 +227,52 @@ _PRIOR_TURN_OVERLAP_MARGIN = 0.10
 _PRIOR_TURN_MIN_OVERLAP = 0.35
 
 
-def _format_history(history: list[dict]) -> str:
-    if not history:
+def _select_recent_history(history: list[dict], token_budget: int) -> list[dict]:
+    """
+    Selects the most recent turns that fit within token_budget,
+    scanning from the newest turn backwards and stopping before the
+    running estimated token count would exceed the budget.
+
+    Always keeps at least the single most recent turn, even if that
+    one turn alone exceeds budget — dropping the current context
+    entirely would remove the very thing this agent needs to resolve
+    "what about X?"-style follow-ups against.
+    """
+    selected: list[dict] = []
+    running = 0
+    for turn in reversed(history):
+        t = estimate_tokens(turn.get("content", ""))
+        if selected and running + t > token_budget:
+            break
+        selected.append(turn)
+        running += t
+    return list(reversed(selected))
+
+
+def _format_history(history: list[dict], summaries: list[dict]) -> str:
+    """
+    Builds the history block shown to the model: long-term summaries
+    (older content, compressed) first, then as many recent verbatim
+    turns as fit inside HISTORY_PROMPT_TOKEN_BUDGET.
+    """
+    if not history and not summaries:
         return "(no prior conversation)"
-    lines = []
-    for turn in history[-MAX_HISTORY_TURNS:]:
-        role = turn.get("role", "user")
-        content = turn.get("content", "")
-        lines.append(f"{role}: {content}")
-    return "\n".join(lines)
+
+    parts = []
+
+    if summaries:
+        summary_lines = "\n".join(
+            f"- {s.get('summary', '')}" for s in summaries if s.get("summary")
+        )
+        if summary_lines:
+            parts.append(f"Earlier conversation summary:\n{summary_lines}")
+
+    recent = _select_recent_history(history, HISTORY_PROMPT_TOKEN_BUDGET)
+    if recent:
+        lines = [f"{t.get('role', 'user')}: {t.get('content', '')}" for t in recent]
+        parts.append("Recent conversation:\n" + "\n".join(lines))
+
+    return "\n\n".join(parts) if parts else "(no prior conversation)"
 
 
 def _looks_unusable(text: str) -> bool:
@@ -319,6 +391,12 @@ def _matches_prior_turn(original: str, rewritten: str, history: list[dict]) -> t
     derived from the current question and should never lose that
     comparison.
 
+    Checks against the FULL history list passed in — not just the
+    token-trimmed subset used for the prompt itself (see
+    _select_recent_history) — since this safety check should compare
+    against everything actually stored for this session, regardless of
+    what fit in this particular prompt.
+
     Returns (matched, matched_turn_content) for logging.
     """
     original_words = _word_set(original)
@@ -353,20 +431,27 @@ class RewriterAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
         original_question = state.question
 
-        # ---- Fetch short-term history ----
+        # ---- Fetch history + long-term summaries ----
+        # 2026-07-25: switched from short_term.get_history() (raw,
+        # summary-blind) to load_context() so long-term summaries of
+        # older, already-evicted turns are actually included instead of
+        # silently missing from every rewrite.
         history = []
+        summaries = []
         if mm_module.memory_manager:
             try:
-                history = await mm_module.memory_manager.short_term.get_history(
+                context = await mm_module.memory_manager.load_context(
                     state.user_id, state.session_id
                 )
+                history = context.get("history", [])
+                summaries = context.get("summaries", [])
             except Exception as e:
-                print(f"[REWRITER] Failed to fetch history, proceeding without it: {e}")
-                history = []
+                print(f"[REWRITER] Failed to fetch context, proceeding without it: {e}")
+                history, summaries = [], []
         else:
             print("[REWRITER] memory_manager not initialized, proceeding without history")
 
-        history_text = _format_history(history)
+        history_text = _format_history(history, summaries)
 
         prompt = (
             f"{REWRITE_SYSTEM_PROMPT}\n\n"
