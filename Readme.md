@@ -8,7 +8,7 @@ Built end-to-end: authentication, a Docling-powered document ingestion pipeline,
 
 This README is written for someone who has **never seen this repository before**. Follow it top to bottom on first setup — the order of steps matters, especially around Docker and environment variables.
 
----
+--- 
 
 ## Table of Contents
 
