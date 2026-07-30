@@ -10,7 +10,7 @@ This README is written for someone who has **never seen this repository before**
 
 --- 
 
-## Table of Contents
+## Table of Contents 
 
 1. [Prerequisites](#prerequisites)
 2. [Architecture](#architecture)
