@@ -61,6 +61,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
+import uuid
 
 from rag_eval_common import (
     numeric_claims_entity_mismatches,
@@ -409,7 +410,17 @@ async def main():
     _orchestrator = AgentOrchestrator()
 
     async def PIPELINE_ENTRYPOINT(question: str, user_id: str):
-        return await _orchestrator.process(question, user_id)
+        # 2026-07-25 fix: previously called _orchestrator.process(question,
+        # user_id) with no session_id, silently defaulting to
+        # "default_session" for every golden-set item. Combined with a fixed
+        # --user-id across the whole run, this meant all 44 "independent"
+        # golden items were actually sharing one Redis-backed conversation
+        # history — pre-dating and unrelated to any memory/rewriter changes,
+        # but responsible for cross-item history bleed in every past eval
+        # run, including the Phase 5 baseline. Each pipeline call now gets
+        # a fresh, unique session_id, guaranteeing true per-item isolation.
+        session_id = f"eval_{uuid.uuid4().hex}"
+        return await _orchestrator.process(question, user_id, session_id=session_id)
 
     # --- 0. Ingestion completeness gate ---------------------------------
     ingestion_report = None
