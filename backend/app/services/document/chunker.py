@@ -1,6 +1,6 @@
 import re
-from typing import List
-import tiktoken
+from typing import List, Optional
+from app.utils.tokenization import count_tokens as _shared_count_tokens, using_groq
 
 class TextChunker:
     """
@@ -26,13 +26,45 @@ class TextChunker:
       first genuine data row is seen (density-based check). Only once
       inside the actual data rows does the stricter table-line/prose
       check apply to decide where the table content ends.
+
+    2026-08-01 fix — tokenizer mismatch (provider-aware):
+      Token counts were computed with tiktoken's cl100k_base encoding
+      (OpenAI's tokenizer), but this project actually runs on two
+      different backends depending on environment (see
+      app/services/llm/provider.py):
+        - local dev: Ollama, serving qwen2.5 (0.5b for routing/grading
+          agents, 7b for the answer agent)
+        - production: Groq's hosted API, serving llama-3.3-70b-versatile
+          (Render free tier has no GPU/RAM for qwen2.5:7b)
+      Neither is OpenAI, so cl100k_base was never the right unit for
+      either environment.
+
+      Counting now goes through app/utils/tokenization.py, which picks
+      Qwen2.5's real (ungated) tokenizer for the Ollama path, and a
+      conservative chars-per-token estimate for the Groq/Llama path
+      (that tokenizer is gated on HuggingFace -- see that module's
+      docstring for the full reasoning). Loaded as a process-wide
+      singleton there, NOT per-TextChunker-instance -- this class used
+      to load its own AutoTokenizer, which re-hit disk on every single
+      document upload since DocumentProcessor (and this chunker) is
+      constructed fresh per background upload task.
     """
 
-    def __init__(self, model: str = "cl100k_base"):
-        self.encoding = tiktoken.get_encoding(model)
-        self.max_tokens = 150
-        self.overlap_tokens = 50
-        self.max_tokens_table = 1000
+    def __init__(
+        self,
+        max_tokens: int = 150,
+        overlap_tokens: int = 50,
+        max_tokens_table: int = 1000,
+        use_groq: Optional[bool] = None,
+    ):
+        # Mirrors LLMProvider's own selection logic (provider.py) so the
+        # chunker's notion of "which backend is this for" never drifts
+        # out of sync with which backend is actually serving answers.
+        self.use_groq = using_groq(use_groq)
+
+        self.max_tokens = max_tokens
+        self.overlap_tokens = overlap_tokens
+        self.max_tokens_table = max_tokens_table
 
         self.separators = [
             "\n\n",
@@ -48,7 +80,7 @@ class TextChunker:
         self._table_title_re = re.compile(r'(?m)^Table\s+\d+:')
 
     def count_tokens(self, text: str) -> int:
-        return len(self.encoding.encode(text))
+        return _shared_count_tokens(text, use_groq=self.use_groq)
 
     def chunk(self, text: str) -> List[dict]:
         text = re.sub(r'\r\n', '\n', text)
@@ -200,9 +232,22 @@ class TextChunker:
         return result
 
     def _hard_split_by_tokens(self, text: str) -> List[str]:
-        tokens = self.encoding.encode(text)
+        if self.use_groq:
+            # No real tokenizer available on this path (see class
+            # docstring / app/utils/tokenization.py) -- fall back to
+            # splitting by the same chars-per-token estimate used in
+            # count_tokens, so this stays consistent with whatever
+            # count_tokens() would report for each resulting piece.
+            char_window = self.max_tokens * 4  # matches tokenization._CHARS_PER_TOKEN
+            return [
+                text[i:i + char_window]
+                for i in range(0, len(text), char_window)
+            ]
+        from app.utils.tokenization import get_qwen_tokenizer
+        tokenizer = get_qwen_tokenizer()
+        tokens = tokenizer.encode(text, add_special_tokens=False)
         return [
-            self.encoding.decode(tokens[i:i + self.max_tokens])
+            tokenizer.decode(tokens[i:i + self.max_tokens])
             for i in range(0, len(tokens), self.max_tokens)
         ]
 

@@ -1,7 +1,29 @@
 from app.agents.base import BaseAgent
 from app.agents.state import AgentState
 from app.agents.prompts import ANSWER_PROMPT
+from app.utils.tokenization import count_tokens
 import re
+
+# 2026-08-01: real context-window budget check.
+#
+# Reserved for the model's own generation. This bounds how much of
+# num_ctx we treat as "spoken for" by the answer itself, so we never
+# compute an "available for context" number by pretending the LLM will
+# generate 0 tokens back. Also passed explicitly to call_llm() below so
+# what we budget against matches what's actually requested -- there
+# was previously a DEFAULT_NUM_CTX=2048 / default generate() max_tokens
+# =2000 mismatch (see provider.py) that left as little as ~48 tokens of
+# real headroom for the entire prompt, regardless of what this file did
+# with chunk sizes. This value is generous for this prompt's own rules
+# (mostly one-sentence or short-list answers; see ANSWER_PROMPT), while
+# leaving real room for retrieved context.
+ANSWER_RESERVED_OUTPUT_TOKENS = 500
+
+# Slack for tokenizer-estimate error (mainly relevant on the Groq path,
+# where counting is a chars-per-token estimate, not an exact count --
+# see app/utils/tokenization.py). Kept out of the "usable" budget so a
+# slight undercount doesn't tip us over num_ctx in practice.
+BUDGET_SAFETY_MARGIN_TOKENS = 50
 
 # Excludes digits embedded inside hyphenated/alphanumeric identifiers
 # (e.g. "StepAudio-2-mini", "GPT-5-Duplex") -- those aren't factual
@@ -190,10 +212,113 @@ class AnswerAgent(BaseAgent):
             print(f"[ANSWER] No usable content — has_docs={has_any_retrieved_docs}, web_error={bool(web_error)}")
             return state
 
-        doc_context = "\n\n".join([
-            f"[Source {i}]\n{doc['text']}"
-            for i, doc in enumerate(top_docs, 1)
-        ])
+        # --- Context-window budget check ---------------------------------
+        # Everything above builds top_docs/tool_context assuming they'll
+        # all fit. Nothing previously checked that against the model's
+        # actual context window before sending -- top_docs was capped at
+        # 3 items, but web results (tool_context) were never capped at
+        # all, and even top_docs alone (3 chunks up to max_tokens_table=
+        # 1000 tokens each, per chunker.py, if any hit a table) could
+        # exceed num_ctx on its own. Silent overflow means Ollama/Groq
+        # truncates the prompt with no signal here that it happened --
+        # possibly dropping the actual answer-bearing chunk with no
+        # error, no low-confidence flag, nothing.
+        #
+        # Fix: measure real prompt overhead (the ANSWER_PROMPT template's
+        # fixed rules/example text, plus this question) using the same
+        # provider-aware counter the chunkers use, reserve room for the
+        # model's own output, and only then work out how much budget is
+        # actually left for retrieved content. Fill that budget by
+        # priority -- protected docs first, then docs by rerank score,
+        # then web results -- and cut off (with logging) rather than
+        # silently stuffing everything in regardless of size.
+        use_groq = getattr(self.llm, "use_groq", False)
+        num_ctx = getattr(self.llm, "num_ctx", 2048)
+
+        scaffold_tokens = count_tokens(
+            ANSWER_PROMPT.format(question=state.question, context=""),
+            use_groq=use_groq,
+        )
+        available_for_context = (
+            num_ctx - ANSWER_RESERVED_OUTPUT_TOKENS - scaffold_tokens
+            - BUDGET_SAFETY_MARGIN_TOKENS
+        )
+
+        if available_for_context <= 0:
+            # num_ctx is too small even for the prompt scaffold + question
+            # + reserved output, before a single piece of retrieved
+            # content is added. Not a crash -- fail loudly here so it's
+            # visible, then proceed with zero context budget (the LLM
+            # will answer from the question alone, same as the "no
+            # usable content" path elsewhere in this file).
+            print(
+                f"[ANSWER][BUDGET] num_ctx={num_ctx} leaves NO room for "
+                f"context (scaffold={scaffold_tokens}, reserved_output="
+                f"{ANSWER_RESERVED_OUTPUT_TOKENS}, margin="
+                f"{BUDGET_SAFETY_MARGIN_TOKENS}). Proceeding with empty "
+                f"context -- consider raising num_ctx or lowering "
+                f"ANSWER_RESERVED_OUTPUT_TOKENS."
+            )
+            available_for_context = 0
+
+        # Priority-ordered candidate blocks: protected docs are never
+        # dropped by choice (only if the budget can't fit them at all,
+        # in which case we log it explicitly rather than quietly
+        # exceeding num_ctx); everything else fills remaining budget in
+        # the order it was already ranked.
+        blocks = []
+        for i, doc in enumerate(top_docs, 1):
+            text = f"[Source {i}]\n{doc['text']}"
+            blocks.append({
+                "text": text,
+                "tokens": count_tokens(text, use_groq=use_groq),
+                "protected": bool(doc.get("protected")),
+                "kind": "doc",
+                "doc": doc,
+            })
+        if tool_context:
+            for entry in tool_context.split("\n\n"):
+                blocks.append({
+                    "text": entry,
+                    "tokens": count_tokens(entry, use_groq=use_groq),
+                    "protected": False,
+                    "kind": "web",
+                    "doc": None,
+                })
+
+        included_blocks = []
+        dropped_blocks = []
+        used_tokens = 0
+        for block in blocks:
+            fits = used_tokens + block["tokens"] <= available_for_context
+            if fits or block["protected"]:
+                included_blocks.append(block)
+                used_tokens += block["tokens"]
+                if not fits:
+                    print(
+                        f"[ANSWER][BUDGET] protected doc included despite "
+                        f"exceeding budget ({block['tokens']} tokens, "
+                        f"available was {available_for_context - (used_tokens - block['tokens'])})"
+                    )
+            else:
+                dropped_blocks.append(block)
+
+        if dropped_blocks:
+            print(
+                f"[ANSWER][BUDGET] dropped {len(dropped_blocks)} block(s) "
+                f"to fit num_ctx={num_ctx}: "
+                + ", ".join(f"{b['kind']}({b['tokens']} tok)" for b in dropped_blocks)
+            )
+
+        # Keep top_docs/tool_context in sync with what's actually being
+        # sent -- state.sources and confidence scoring below both read
+        # top_docs, and previously always matched everything built above.
+        # If a doc got dropped for budget reasons, it must also disappear
+        # from top_docs, or the UI would cite a source that was never
+        # actually shown to the LLM.
+        top_docs = [b["doc"] for b in included_blocks if b["kind"] == "doc"]
+        doc_context = "\n\n".join(b["text"] for b in included_blocks if b["kind"] == "doc")
+        tool_context = "\n\n".join(b["text"] for b in included_blocks if b["kind"] == "web")
 
         context_parts = [p for p in (doc_context, tool_context) if p]
         context = "\n\n".join(context_parts) if context_parts else "(no context available)"
@@ -201,6 +326,8 @@ class AnswerAgent(BaseAgent):
         print(
             f"[ANSWER] Using {len(top_docs)} top documents"
             + (f" + {web_result_count} web results" if tool_context else "")
+            + f" | budget: scaffold={scaffold_tokens} used={used_tokens}/"
+            f"{available_for_context} num_ctx={num_ctx}"
         )
 
         try:
@@ -209,7 +336,7 @@ class AnswerAgent(BaseAgent):
                 context=context
             )
 
-            response = await self.call_llm(prompt)
+            response = await self.call_llm(prompt, max_tokens=ANSWER_RESERVED_OUTPUT_TOKENS)
             state.answer = response.strip()
 
             # 2026-07-14 fix: pass state.question through so the grounding

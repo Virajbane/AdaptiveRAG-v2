@@ -37,17 +37,32 @@ Three problems this fixes (found via eval_rag.py root-cause analysis):
 """
 
 from typing import List, Optional
-import tiktoken
+from app.utils.tokenization import count_tokens as _shared_count_tokens, using_groq
 
 
 class DoclingChunker:
-    def __init__(self, model: str = "cl100k_base", max_tokens: int = 150, overlap_tokens: int = 50):
-        self.encoding = tiktoken.get_encoding(model)
+    """
+    2026-08-01 fix — tokenizer mismatch: see chunker.py's matching
+    docstring and app/utils/tokenization.py for the full reasoning.
+    Counting is routed through the shared, process-wide tokenizer
+    there instead of loading a private AutoTokenizer per instance --
+    DoclingChunker (like TextChunker) is constructed fresh per
+    background upload task, so a per-instance load would re-hit disk
+    on every single PDF upload.
+    """
+
+    def __init__(
+        self,
+        max_tokens: int = 150,
+        overlap_tokens: int = 50,
+        use_groq: Optional[bool] = None,
+    ):
+        self.use_groq = using_groq(use_groq)
         self.max_tokens = max_tokens
         self.overlap_tokens = overlap_tokens
 
     def count_tokens(self, text: str) -> int:
-        return len(self.encoding.encode(text))
+        return _shared_count_tokens(text, use_groq=self.use_groq)
 
     def chunk(self, doc) -> List[dict]:
         """
