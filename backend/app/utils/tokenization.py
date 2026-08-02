@@ -27,6 +27,23 @@ therefore TextChunker) is constructed fresh per background upload task
 (see app/api/v1/endpoints/documents.py's process_document), so without
 this, every single document upload would re-load the tokenizer from
 disk. One load per process, reused by every caller after that.
+
+2026-08-02 fix — offline fallback:
+  First real run surfaced this: AutoTokenizer.from_pretrained() needs
+  to reach huggingface.co on its FIRST call (to check/download the
+  tokenizer files), and if that network isn't available (dev machine
+  with no route out, firewalled server, etc.), the original code let
+  that exception propagate straight up -- which crashed the entire
+  AnswerAgent, not just token counting. A token-counting convenience
+  should never be able to take down answer generation entirely.
+
+  Fixed: wrapped the load in try/except. On failure, permanently fall
+  back to the same conservative chars-per-token estimate used on the
+  Groq path for the rest of this process's lifetime, and print a clear
+  one-time warning explaining why (so it's visible, but doesn't spam
+  logs on every single call). This means local/dev runs get exact Qwen
+  counts once the tokenizer is cached, and a safe degraded estimate if
+  it can never be downloaded -- never a crash either way.
 """
 
 from typing import Optional
@@ -35,13 +52,18 @@ from app.config.settings import settings
 _CHARS_PER_TOKEN = 4
 _QWEN_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
-_tokenizer = None  # process-wide singleton, populated on first use
+_tokenizer = None       # process-wide singleton, populated on first use
+_tokenizer_failed = False  # set permanently if the download ever fails
 
 
 def get_qwen_tokenizer():
     """Public accessor for callers that need encode/decode directly (e.g.
     hard-splitting an oversized piece of text by raw token slices), not
-    just a count. Same cached singleton as count_tokens() uses."""
+    just a count. Same cached singleton as count_tokens() uses.
+
+    Raises if the tokenizer can't be loaded -- callers that can tolerate
+    a fallback should go through count_tokens() instead, which catches
+    this and degrades gracefully."""
     global _tokenizer
     if _tokenizer is None:
         from transformers import AutoTokenizer
@@ -56,13 +78,32 @@ def using_groq(use_groq: Optional[bool] = None) -> bool:
 
 
 def count_tokens(text: str, use_groq: Optional[bool] = None) -> int:
+    global _tokenizer_failed
     if not text:
         return 0
-    if using_groq(use_groq):
-        # Conservative estimate -- see module docstring. Deliberately
-        # not exact; erring toward slightly smaller chunks/budget than
-        # a real Llama-3.3 tokenizer would produce is the safe
-        # direction (undercounting risks overflow, overcounting only
-        # costs a little headroom).
-        return max(1, len(text) // _CHARS_PER_TOKEN)
-    return len(get_qwen_tokenizer().encode(text, add_special_tokens=False))
+
+    use_estimate = using_groq(use_groq) or _tokenizer_failed
+    if not use_estimate:
+        try:
+            return len(get_qwen_tokenizer().encode(text, add_special_tokens=False))
+        except Exception as e:
+            # No route to huggingface.co (or corrupted/missing local
+            # cache) -- degrade permanently for this process rather than
+            # retrying the network on every single call, and never let
+            # this exception reach the caller.
+            _tokenizer_failed = True
+            print(
+                f"[TOKENIZATION] Could not load Qwen tokenizer "
+                f"({type(e).__name__}: {e}). Falling back to the "
+                f"chars-per-token estimate for the rest of this "
+                f"process. To get exact counts, ensure this machine "
+                f"can reach huggingface.co once (to cache the "
+                f"tokenizer files), or pre-download it -- see README/"
+                f"deployment notes."
+            )
+
+    # Conservative estimate -- see module docstring. Deliberately not
+    # exact; erring toward slightly smaller chunks/budget than a real
+    # tokenizer would produce is the safe direction (undercounting
+    # risks overflow, overcounting only costs a little headroom).
+    return max(1, len(text) // _CHARS_PER_TOKEN)

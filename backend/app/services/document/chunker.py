@@ -232,24 +232,36 @@ class TextChunker:
         return result
 
     def _hard_split_by_tokens(self, text: str) -> List[str]:
+        char_window = self.max_tokens * 4  # matches tokenization._CHARS_PER_TOKEN
+
+        def _char_fallback():
+            return [
+                text[i:i + char_window]
+                for i in range(0, len(text), char_window)
+            ]
+
         if self.use_groq:
             # No real tokenizer available on this path (see class
             # docstring / app/utils/tokenization.py) -- fall back to
             # splitting by the same chars-per-token estimate used in
             # count_tokens, so this stays consistent with whatever
             # count_tokens() would report for each resulting piece.
-            char_window = self.max_tokens * 4  # matches tokenization._CHARS_PER_TOKEN
+            return _char_fallback()
+
+        try:
+            from app.utils.tokenization import get_qwen_tokenizer
+            tokenizer = get_qwen_tokenizer()
+            tokens = tokenizer.encode(text, add_special_tokens=False)
             return [
-                text[i:i + char_window]
-                for i in range(0, len(text), char_window)
+                tokenizer.decode(tokens[i:i + self.max_tokens])
+                for i in range(0, len(tokens), self.max_tokens)
             ]
-        from app.utils.tokenization import get_qwen_tokenizer
-        tokenizer = get_qwen_tokenizer()
-        tokens = tokenizer.encode(text, add_special_tokens=False)
-        return [
-            tokenizer.decode(tokens[i:i + self.max_tokens])
-            for i in range(0, len(tokens), self.max_tokens)
-        ]
+        except Exception as e:
+            # Same reasoning as tokenization.count_tokens()'s fallback:
+            # a missing/unreachable tokenizer download must never crash
+            # chunking. Degrade to the char-based split instead.
+            print(f"[CHUNKER] Qwen tokenizer unavailable ({type(e).__name__}), using char-based split fallback.")
+            return _char_fallback()
 
     def _merge_with_overlap(self, splits: List[str]) -> List[str]:
         chunks = []
