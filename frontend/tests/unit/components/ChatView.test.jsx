@@ -20,7 +20,7 @@ import ChatView from '../../../components/layout/dashboard/views/ChatView';
 import { useChat } from '@/app/context/ChatContext';
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -49,6 +49,15 @@ function makeMessage(overrides = {}) {
   };
 }
 
+// The composer row (the pill containing the '+' button, textarea, and the
+// paperclip/send buttons) is the immediate parent of the textarea. Scoping
+// to it avoids relying on a global button index, which shifts depending on
+// whether the loading indicator's own Cancel button is also in the tree.
+function getSendButton(textarea) {
+  const composerRow = textarea.closest('div');
+  return within(composerRow).getAllByRole('button')[2];
+}
+
 beforeEach(() => {
   // jsdom doesn't implement these; ChatView calls both.
   Element.prototype.scrollIntoView = vi.fn();
@@ -71,13 +80,13 @@ describe('ChatView — empty state', () => {
 
   it('pluralizes "file(s)" correctly for 0, 1, and multiple documents', () => {
     const { rerender } = render(<ChatView documentCount={0} />);
-    expect(screen.getByText(/Searching 0 files/)).toBeInTheDocument();
+    expect(screen.getByText(/^Searching 0 files/)).toBeInTheDocument();
 
     rerender(<ChatView documentCount={1} />);
-    expect(screen.getByText(/Searching 1 file(?!s)/)).toBeInTheDocument();
+    expect(screen.getByText(/^Searching 1 file(?!s)/)).toBeInTheDocument();
 
     rerender(<ChatView documentCount={5} />);
-    expect(screen.getByText(/Searching 5 files/)).toBeInTheDocument();
+    expect(screen.getByText(/^Searching 5 files/)).toBeInTheDocument();
   });
 
   it('hides the empty prompt once there is at least one message', () => {
@@ -215,11 +224,7 @@ describe('ChatView — composer send behavior', () => {
   it('disables the send button when input is empty and enables it once text is entered', async () => {
     render(<ChatView />);
     const textarea = screen.getByPlaceholderText('Ask about your knowledge base…');
-    // DOM order with no messages rendered: [+ button, attach button, send
-    // button, @web tag, @sql tag]. None of these buttons have distinguishing
-    // accessible names (icon-only), so we pin down the send button by its
-    // known position rather than an ambiguous CSS selector.
-    const sendButton = screen.getAllByRole('button')[2];
+    const sendButton = getSendButton(textarea);
 
     expect(sendButton).toBeDisabled();
     const user = userEvent.setup();
@@ -232,7 +237,7 @@ describe('ChatView — composer send behavior', () => {
     render(<ChatView />);
     const textarea = screen.getByPlaceholderText('Ask about your knowledge base…');
     expect(textarea).toBeDisabled();
-    expect(screen.getAllByRole('button')[2]).toBeDisabled();
+    expect(getSendButton(textarea)).toBeDisabled();
   });
 });
 
@@ -264,12 +269,17 @@ describe('ChatView — loading indicator and cancel', () => {
   // Ties back to the Stage 3 `it.fails` tripwire in ChatContext.test.jsx
   // (useChat() doesn't expose `elapsed`). This test mocks useChat() to
   // match that *actual* real-world shape — no `elapsed` key at all — and
-  // confirms the bug flows all the way through to the rendered UI: the
-  // cancel button literally reads "Cancel (undefineds)". This is a
-  // passing test that documents current (buggy) behavior, per the
+  // confirms the bug flows all the way through to the rendered UI.
+  //
+  // Note on the exact manifestation: `Cancel ({elapsed}s)` is JSX, not
+  // string concatenation, so when `elapsed` is undefined React renders
+  // *nothing* for that child rather than the literal word "undefined".
+  // The actual broken output is the garbled "Cancel (s)" — no number, no
+  // "undefined" text, just the units with nothing in front of them. This
+  // is a passing test that documents current (buggy) behavior, per the
   // project's ground rules; it should be revisited (and likely deleted or
   // flipped) the moment the Stage 3 elapsed fix lands.
-  it('BUG (tied to Stage 3 elapsed finding): renders literal "Cancel (undefineds)" when useChat omits elapsed', () => {
+  it('BUG (tied to Stage 3 elapsed finding): renders garbled "Cancel (s)" when useChat omits elapsed', () => {
     useChat.mockReturnValue({
       messages: [],
       loading: true,
@@ -278,7 +288,7 @@ describe('ChatView — loading indicator and cancel', () => {
       cancelMessage: vi.fn(),
     });
     render(<ChatView />);
-    expect(screen.getByText('Cancel (undefineds)')).toBeInTheDocument();
+    expect(screen.getByText('Cancel (s)')).toBeInTheDocument();
   });
 });
 
