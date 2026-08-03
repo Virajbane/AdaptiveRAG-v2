@@ -45,8 +45,22 @@ class Settings(BaseSettings):
     # a setting (not hardcoded) so it can be swapped without a code change
     # if a given model proves too weak on dense charts (e.g. try
     # "qwen2.5vl:3b" if "moondream" undershoots on the UTMOS bar chart).
+    #
+    # 2026-08-03 fix (Q18 root cause, confirmed via debug_vision_model_direct.py):
+    # moondream (1.6B) is a lightweight captioning model -- confirmed by direct
+    # isolated testing (correct image, correct payload/content-block shape,
+    # correct resolution) to hallucinate unrelated narratives on dense bar
+    # charts (e.g. described the UTMOS chart as "an excel graph of user test
+    # scores") instead of transcribing labeled values, and does not reliably
+    # follow structured "label: value" output instructions. Swapped to
+    # qwen2.5vl:7b, which has real document/chart-OCR-style reading ability
+    # and follows structured output formatting far more reliably. Requires
+    # `ollama pull qwen2.5vl:7b` before this takes effect. If precision on
+    # individual digits is still off, "minicpm-v" is a strong alternative
+    # worth A/B testing -- it's tuned specifically for dense document/OCR
+    # understanding rather than general image captioning.
     ENABLE_PICTURE_DESCRIPTION: bool = True
-    PICTURE_DESCRIPTION_MODEL: str = "moondream"
+    PICTURE_DESCRIPTION_MODEL: str = "qwen2.5vl:7b"
 
     # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None

@@ -1,99 +1,101 @@
-# PATH: backend/requirements.txt
-# FIX: docling depends on torch, which by default pulls the full GPU/CUDA
-# build (~2.5GB+ of nvidia-* packages: cublas, cudnn, nccl, cufft, cusolver,
-# triton, etc.) even though this container has no GPU and never uses them.
-# This line forces pip to resolve torch from the CPU-only wheel index
-# instead (~200MB total instead of several GB) -- this was the actual cause
-# of the "OSError: [Errno 5] Input/output error" disk-space failure.
---extra-index-url https://download.pytorch.org/whl/cpu
+# PATH: backend/app/config/settings.py
+from pydantic_settings import BaseSettings
+from typing import Optional
 
-# All versions below are pinned to the exact set proven to install and run
-# together in the local dev venv (captured via `pip freeze`). This avoids
-# pip's dependency-backtracking spiral entirely -- every version here is
-# already known-compatible, so builds resolve in seconds instead of minutes.
 
-fastapi==0.137.2
-uvicorn[standard]==0.49.0
-python-multipart==0.0.32
+class Settings(BaseSettings):
+    # ==================== APP ====================
+    APP_NAME: str = "RAG 2.0 System"
+    DEBUG: bool = True
 
-pymongo==4.17.0
-motor==3.7.1
-redis==8.0.0
+    # ==================== DATABASE ====================
+    MONGODB_URL: str  # Required from .env
+    QDRANT_URL: str = "http://localhost:6333"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    QDRANT_API_KEY: Optional[str] = None
 
-qdrant-client==1.7.1
+    # ==================== LANGSMITH ====================
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_PROJECT: str = "rag-2.0-system"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
 
-ollama==0.6.2
-openai==2.44.0
-groq==1.5.0
+    # ==================== LLM ====================
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen2.5:7b"
+    OLLAMA_FAST_MODEL: str = "qwen2.5:0.5b"
+    EMBEDDING_MODEL: str = "nomic-embed-text"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    ENABLE_RERANKER: bool = True
 
-langchain==1.3.11
-langchain-core==1.4.8
-langchain-community==0.4.1
-langgraph==1.2.5
-langsmith==0.9.4
-langchain-ollama==1.1.0
+    # ==================== DOCUMENT PROCESSING ====================
+    # Pages per mini-PDF batch when parsing via Docling. Bounds Docling's
+    # peak memory per convert() call (~this many pages' worth of
+    # layout/table analysis at once) instead of scaling with total
+    # document size -- fixes std::bad_alloc on large/complex PDFs.
+    # Tune down (e.g. 3) on smaller/memory-constrained environments.
+    DOCLING_BATCH_SIZE: int = 5
 
-# FIX: was python-docx==0.8.11, which conflicts with docling's requirement
-# of python-docx>=1.1.2 -- this was the actual root cause of pip
-# backtracking docling all the way down to an ancient, API-incompatible
-# 1.20.0 release. Bumped to the version proven working locally alongside
-# a modern docling.
-docling==2.111.0
+    # Vision model used by Docling's picture-description pass to transcribe
+    # chart/figure content (e.g. bar chart values) into searchable text.
+    # 2026-07-14 fix (Bug 3, figure-value extraction): figures were
+    # previously dropped entirely at chunking -- DoclingChunker had no
+    # branch for PICTURE items, and no description existed to chunk in the
+    # first place since do_picture_description was never enabled. Kept as
+    # a setting (not hardcoded) so it can be swapped without a code change
+    # if a given model proves too weak on dense charts (e.g. try
+    # "qwen2.5vl:3b" if "moondream" undershoots on the UTMOS bar chart).
+    #
+    # 2026-08-03 fix (Q18 root cause, confirmed via debug_vision_model_direct.py):
+    # moondream (1.6B) is a lightweight captioning model -- confirmed by direct
+    # isolated testing (correct image, correct payload/content-block shape,
+    # correct resolution) to hallucinate unrelated narratives on dense bar
+    # charts (e.g. described the UTMOS chart as "an excel graph of user test
+    # scores") instead of transcribing labeled values, and does not reliably
+    # follow structured "label: value" output instructions. Swapped to
+    # qwen2.5vl:3b (not 7b -- dev machine has a 2GB VRAM GPU, 7b won't fit).
+    # Requires `ollama pull qwen2.5vl:3b` before this takes effect. Expect
+    # this to run partly/mostly on CPU via Ollama's automatic VRAM/RAM
+    # offload -- slow (seconds, possibly tens of seconds per figure) but
+    # acceptable since do_picture_description only runs once per document
+    # at ingestion time, not per chat query. If precision on individual
+    # digits is still off at 3b, consider routing this one step to a
+    # hosted vision API (e.g. gpt-4o-mini) instead of a larger local model,
+    # since VRAM is the hard constraint here, not just this specific model.
+    ENABLE_PICTURE_DESCRIPTION: bool = True
+    PICTURE_DESCRIPTION_MODEL: str = "qwen2.5vl:3b"
 
-python-dotenv==1.2.2
-pydantic==2.13.4
-pydantic-settings==2.14.1
+    # ==================== API KEYS ====================
+    OPENAI_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    TAVILY_API_KEY: str = ""
+    VOYAGE_API_KEY: Optional[str] = None
 
-aiohttp==3.14.1
-tenacity==9.0.0
-voyageai==0.4.1
-pyjwt==2.13.0
-bcrypt==5.0.0
+    # ==================== SECURITY ====================
+    # NOTE: standardized on SECRET_KEY everywhere (app code, .env, .env.example,
+    # docker-compose.yml, docker-compose.prod.yml). Previously some compose
+    # files set JWT_SECRET_KEY instead, which pydantic-settings does NOT map
+    # onto SECRET_KEY -- that caused a required-field crash on container boot.
+    SECRET_KEY: str  # Required from .env
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_HOURS: int = 24
 
-nltk==3.10.0
+    ENCRYPTION_KEY: str = "default-change-in-production"
+    ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+    PASSWORD_MIN_LENGTH: int = 8
+    PASSWORD_REQUIRE_UPPERCASE: bool = True
+    PASSWORD_REQUIRE_LOWERCASE: bool = True
+    PASSWORD_REQUIRE_DIGITS: bool = True
+    PASSWORD_REQUIRE_SPECIAL: bool = True
 
-prometheus-client==0.25.0
+    # ==================== CORS ====================
+    FRONTEND_URL: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
 
-pytest==8.4.2
-pytest-asyncio==0.24.0
-httpx==0.28.1
+    class Config:
+        env_file = ".env"
+        extra = "allow"  # Allow extra fields from .env
 
-PyPDF2==3.0.1
-# NEW (2026-07-14): pdf_batcher.py imports PdfReader/PdfWriter from this
-# directly for page-range batching before handing PDFs to Docling. This is
-# NOT pulled in transitively by docling -- docling's own PDF backend is
-# pypdfium2, a different package -- so it must be listed explicitly here
-# or a fresh `pip install -r requirements.txt` will hit ImportError.
-# Pinned to the version confirmed working against pdf_batcher.py's actual
-# split/cleanup code (add_page, write signatures verified compatible).
-pypdf==6.14.2
-# FIX: bumped from 0.8.11 -- see docling note above. python-docx's core
-# API (Document(), .paragraphs, .tables, adding headings/text) is stable
-# across this jump, but do a quick smoke test on DOCX upload after
-# rebuilding just in case.
-python-docx==1.2.0
-# FIX (2026-08-01): replaced tiktoken (OpenAI's tokenizer) with
-# transformers, so chunker.py / docling_chunker.py can load Qwen2.5's
-# actual tokenizer for the Ollama path -- tiktoken's cl100k_base never
-# matched either backend this project actually runs (Qwen2.5 locally,
-# Llama-3.3 via Groq in production). The Groq/Llama path doesn't get a
-# real tokenizer either (that model's tokenizer is gated on
-# HuggingFace) -- it uses a conservative chars-per-token estimate
-# instead, same one already used in app/services/memory/token_utils.py.
-# transformers is already a transitive dep of sentence-transformers, but
-# pinning it explicitly here so a future sentence-transformers bump
-# can't silently drop it and break both chunkers.
-transformers==4.46.3
-reportlab==4.0.7
-rank_bm25==0.2.2
-# FIX: bumped from 1.23.8 -- old version was incompatible with the modern
-# dependency chain pulled in by docling/pandas/numpy.
-PyMuPDF==1.27.2.3
 
-sentence-transformers==5.6.0
-tavily-python==0.7.26
-
-email-validator==2.3.0
-
-# --- Ragas eval (formerly requirements-eval.txt, now merged here) ---
-ragas==0.4.3
+settings = Settings()

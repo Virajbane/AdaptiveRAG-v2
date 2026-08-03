@@ -4,7 +4,7 @@ docling_chunker.py
 Structure-aware chunker built on Docling's parsed document, replacing
 the regex-based table/section handling in chunker.py for PDFs.
 
-Three problems this fixes (found via eval_rag.py root-cause analysis):
+Four problems this fixes (found via eval_rag.py root-cause analysis):
 
 1. Table fragmentation (2026-07-09): the old chunker split dense numeric
    tables by token count alone, producing bare number streams with no
@@ -34,6 +34,22 @@ Three problems this fixes (found via eval_rag.py root-cause analysis):
    PictureDescriptionApiOptions config) and chunks it the same way a
    table row is chunked -- anchored to its section heading so it's
    retrievable the same way.
+
+4. Duplicate column name collision (2026-08-03): wide comparison tables
+   (e.g. Table 1: LlamaQ S->T/S->S, TriviaQA S->T/S->S, ..., Avg S->T/
+   S->S) repeat the same leaf column name once per benchmark group. If
+   Docling's export_to_dataframe() doesn't preserve that grouping as a
+   MultiIndex, df.columns ends up with real duplicates (e.g. "S->T"
+   three times over). The old code indexed each row by NAME
+   (row[col]), and pandas returns EVERY same-named column as a Series
+   when the name is duplicated -- not a single scalar. So "Lat.=826"
+   (Lychee-FD, FullDuplexBench 1.5) silently became a garbled
+   multi-value block whenever "Lat." also existed for FullDuplexBench
+   1.0, and a downstream reader (verification pass or the LLM itself)
+   could pick the wrong line out of it. Confirmed as the source of the
+   Q16 Lat./Stop. swap and the Q11-14 "couldn't verify" failures on
+   Table 1. Fixed below by indexing values POSITIONALLY instead of by
+   name, so duplicate names can never collide.
 """
 
 from typing import List, Optional
@@ -198,12 +214,41 @@ class DoclingChunker:
 
         chunks = []
         columns = [str(c) for c in df.columns]
-        row_label_col = columns[0] if columns else None
+
+        # 2026-08-03 fix — duplicate column name collision (see module
+        # docstring, item 4). Wide comparison tables repeat the same leaf
+        # column name once per benchmark group (e.g. "S->T"/"S->S" under
+        # LlamaQ, TriviaQA, and Avg; or "Lat."/"Stop." under
+        # FullDuplexBench 1.0 and 1.5). If Docling's dataframe export
+        # doesn't preserve that grouping as a MultiIndex, df.columns ends
+        # up with real duplicate names. Indexing a row by NAME (row[col])
+        # then returns EVERY same-named column as a pandas Series instead
+        # of one scalar -- silently corrupting the row's serialized text
+        # (e.g. "Lat.=826" became a garbled multi-value block whenever
+        # more than one "Lat." column existed).
+        #
+        # Fix: read every value POSITIONALLY (list(row)) so duplicate
+        # names can never collide -- value at index i always corresponds
+        # to columns[i], regardless of how many other columns share that
+        # name. Disambiguate the display label for any repeat so the
+        # chunk text stays legible: "S->T", then "S->T (2)", "S->T (3)"
+        # for later occurrences, rather than looking like a silent
+        # overwrite.
+        seen: dict = {}
+        disambiguated = []
+        for c in columns:
+            seen[c] = seen.get(c, 0) + 1
+            disambiguated.append(c if seen[c] == 1 else f"{c} ({seen[c]})")
+
+        row_label_idx = 0 if disambiguated else None
 
         for _, row in df.iterrows():
-            row_label = str(row[row_label_col]) if row_label_col else ""
-            pairs = [f"{col}={row[col]}" for col in columns[1:]] if row_label_col else \
-                     [f"{col}={row[col]}" for col in columns]
+            values = list(row)  # positional -- immune to duplicate names
+            row_label = str(values[row_label_idx]) if row_label_idx is not None else ""
+            value_cols = disambiguated[1:] if row_label_idx is not None else disambiguated
+            value_vals = values[1:] if row_label_idx is not None else values
+
+            pairs = [f"{col}={val}" for col, val in zip(value_cols, value_vals)]
 
             header_line = f"[Section: {heading}]" if heading else ""
             caption_line = f"Table: {caption}" if caption else ""

@@ -1,6 +1,19 @@
 """
 docling_parser.py
-...
+
+2026-08-03 fix — picture images rendered too small to read (see
+_build_pipeline_options below): confirmed via debug_vision_model_direct.py
+that a real figure (the UTMOS bar chart on page 8) was being rendered as a
+67x19 pixel PNG before ever reaching the vision model. At that resolution
+no vision model can read axis labels or bar values -- this explains BOTH
+failure modes seen in production: some figures got no annotation at all
+(model found nothing legible), and others produced plausible-looking but
+meaningless numeric output (model guessing at a blurry image instead of
+transcribing real data). This was never a prompt or model-choice problem;
+Docling's default rendering scale for extracted pictures is close to
+screen resolution, which is fine for a thumbnail preview but not for OCR/
+VLM transcription of dense chart data. Fixed by setting images_scale
+explicitly (see below) so pictures render large enough to actually read.
 """
 
 import logging
@@ -51,9 +64,28 @@ _PICTURE_DESCRIPTION_PROMPT = (
     "shown."
 )
 
+# 2026-08-03 fix -- see module docstring. Docling's own default for
+# extracted-picture resolution is tuned for thumbnail-sized previews,
+# not for OCR/VLM transcription of dense chart data. Confirmed directly:
+# a real bar chart (Figure 4, page 8) rendered at only 67x19 pixels under
+# the default, which is well below what any vision model can read text
+# or bar heights from. images_scale is a multiplier on top of Docling's
+# base rendering size (roughly 72 DPI-equivalent at scale=1.0); 4.0 gets
+# dense figures into a legible range at the cost of somewhat slower
+# parsing and slightly larger memory use per page -- worth it since the
+# alternative was silently unusable images. If figures are still
+# illegible after this change, try 6.0 next; there's no universal "right"
+# value, since it depends on how small the source figure is on the page.
+_PICTURE_IMAGES_SCALE = 4.0
+
 
 def _build_pipeline_options() -> PdfPipelineOptions:
     options = PdfPipelineOptions()
+
+    # 2026-08-03 fix: must be set regardless of do_picture_description,
+    # since it controls the resolution of the rendered image that gets
+    # produced for any picture item, not just what's sent to the VLM.
+    options.images_scale = _PICTURE_IMAGES_SCALE
 
     if settings.ENABLE_PICTURE_DESCRIPTION:
         # 2026-07-15 fix: Docling has its OWN separate safety gate for any
@@ -73,6 +105,8 @@ def _build_pipeline_options() -> PdfPipelineOptions:
         # generate_picture_images=True: the picture-description model needs
         # an actual rendered image to look at, not just the page's parsed
         # layout structure -- this is what makes that image available to it.
+        # Combined with images_scale above, this is now a legible image
+        # rather than a thumbnail-sized one.
         options.generate_picture_images = True
         options.do_picture_description = True
         options.picture_description_options = PictureDescriptionApiOptions(
@@ -109,24 +143,8 @@ class DoclingPDFParser:
                 "status": ConversionStatus,      # SUCCESS, PARTIAL_SUCCESS
                 "page_errors": [str, ...],       # error messages; empty list if none
             }
-
-        BREAKING CHANGE from previous version: this used to return the bare
-        DoclingDocument. Callers must now do parse(...)["document"] to get
-        what they previously got directly.
-
-        Why: converter.convert() defaulted to raises_on_error=True, and this
-        function only ever returned result.document -- so result.status and
-        result.errors were discarded even on a PARTIAL_SUCCESS conversion
-        (e.g. one page hit a bad_alloc/OCR failure but the rest parsed fine).
-        Those pages' content never becomes chunks, so it never shows up in
-        chunk-level failed_chunk_indices either -- it's a silent gap
-        upstream of chunking entirely. This surfaces it instead.
         """
         converter = DoclingPDFParser._get_converter()
-        # raises_on_error=False: let FAILURE be reported as data (status +
-        # errors) rather than an exception, consistent with how
-        # embed_batch/store_vectors report failure as data rather than
-        # raising -- we decide what to do with it below, not in convert().
         result = converter.convert(file_path, raises_on_error=False)
         if not hasattr(result, "document"):
             result = next(iter(result))
@@ -134,10 +152,6 @@ class DoclingPDFParser:
         page_errors = [e.error_message for e in result.errors]
 
         if result.status == ConversionStatus.FAILURE:
-            # Total failure -- no usable document at all. This is the one
-            # case that should still raise: there's nothing to chunk, no
-            # partial content to preserve, same logic as embed_batch's
-            # "if not successful_chunks: raise" case.
             raise ValueError(
                 f"Docling failed to convert {file_path}: "
                 f"{'; '.join(page_errors) if page_errors else 'no error detail available'}"
@@ -151,38 +165,6 @@ class DoclingPDFParser:
 
     @staticmethod
     def _retry_batch_at_page_level(batch, converter) -> dict:
-        """
-        2026-07-14 fix (Bug 1 -- silent page loss on pages 19-22): when a
-        multi-page batch fails outright (std::bad_alloc or FAILURE
-        status), the OLD behavior lost every page in that batch, even if
-        only one page was actually the memory-hog. E.g. a batch_size=5
-        batch covering pages 18-22 would lose all 5 pages even though the
-        original crash logs showed the failure was specific to individual
-        pages (19, 20, 21, 22 each logged their own bad_alloc separately).
-
-        This re-splits the FAILED BATCH's own mini-PDF (batch.file_path,
-        already just a handful of pages) down to single-page mini-PDFs
-        and retries each page alone -- isolating exactly which page(s)
-        are unparseable instead of writing off the whole batch.
-
-        ASSUMPTION TO VERIFY: split_pdf_into_batches(batch.file_path, ...)
-        is assumed to return start_page/end_page 0-indexed RELATIVE TO
-        THE FILE PASSED IN (i.e. relative to this already-small mini-PDF),
-        the same way the top-level call in parse_in_batches works
-        relative to the original file. That's why `batch.start_page +
-        sub.start_page` is used below to recover the page's ABSOLUTE
-        position in the original document. If pdf_batcher.py instead
-        always returns page numbers absolute to the original file
-        regardless of what it's splitting, drop that offset.
-
-        Returns:
-            {
-                "documents": [{"document": DoclingDocument,
-                                "start_page": int, "end_page": int}, ...],
-                "still_failed_pages": [int, ...],  # 0-indexed, ABSOLUTE
-                                                     # (original document)
-            }
-        """
         sub_batches = split_pdf_into_batches(batch.file_path, batch_size=1)
         succeeded: list[dict] = []
         still_failed_pages: list[int] = []
@@ -208,10 +190,6 @@ class DoclingPDFParser:
                     )
 
                 except Exception as e:
-                    # Same page failed even in complete isolation -- a
-                    # single-page PDF is about as small as we can make
-                    # the input, so this is treated as a real, page-level
-                    # failure rather than retried further.
                     logger.error(
                         "Page %d still failed at single-page isolation: %s",
                         absolute_page + 1, e,
@@ -225,24 +203,6 @@ class DoclingPDFParser:
 
     @staticmethod
     def _fallback_extract_page_text(file_path: str, page_number: int) -> str | None:
-        """
-        2026-07-14 fix (Bug 1, fix option #4 from the eval report): last
-        resort plain-text extraction for a page Docling could not process
-        even in single-page isolation. Trades structure-aware parsing
-        (tables, reading order, headings, figure captions) for just
-        getting SOME text instead of losing the page's content entirely
-        -- e.g. a page that's genuinely too memory-heavy for Docling's
-        layout model to lay out, but whose raw text PyMuPDF can still
-        pull with negligible memory.
-
-        page_number is 0-indexed, ABSOLUTE (position in the original
-        document), matching still_failed_pages above.
-
-        Returns None (not an empty string) if PyMuPDF itself isn't
-        installed, the page is out of range, or extraction produced no
-        usable text -- callers should treat None as "still genuinely
-        lost" and surface that, not silently drop it.
-        """
         try:
             import fitz  # PyMuPDF -- confirm this is in requirements
         except ImportError:
@@ -270,63 +230,6 @@ class DoclingPDFParser:
 
     @staticmethod
     def parse_in_batches(file_path: str, batch_size: int = 5) -> dict:
-        """
-        Splits `file_path` into page-range mini-PDFs (see pdf_batcher.py) and
-        runs DocumentConverter.convert() on EACH ONE SEPARATELY, so a
-        bad_alloc on one batch only costs that batch's pages, not the whole
-        document -- same "isolate the failure, don't let it take down
-        everything else" pattern as embed_batch's per-chunk retry.
-
-        2026-07-14 fix (Bug 1): a batch-level failure no longer means
-        every page in that batch is lost. It now goes through two more
-        recovery stages before giving up on a page:
-          1. Retry the failed batch at single-page granularity
-             (_retry_batch_at_page_level) -- isolates whether the WHOLE
-             batch was unparseable or just one bad page within it.
-          2. For any page still failing alone, fall back to PyMuPDF plain
-             text extraction (_fallback_extract_page_text) -- degraded
-             but present, instead of silently absent.
-        A page only ends up in `pages_fully_lost` if BOTH of those fail.
-
-        Design note -- deliberately does NOT merge DoclingDocument objects.
-        Docling has no supported API for splicing multiple DoclingDocuments
-        into one (their internal texts/tables/pictures/groups/page-ref
-        structure isn't designed for it), and hand-rolling that merge is a
-        good way to silently corrupt cross-references later. Instead this
-        returns a LIST of (document, start_page) pairs -- chunk each one
-        separately with your existing DoclingChunker.chunk() call, then
-        concatenate the resulting chunk lists. Merging AFTER chunking is
-        safe because chunks are just text + metadata by that point.
-
-        Returns:
-            {
-                "documents": [
-                    {"document": DoclingDocument, "start_page": int, "end_page": int},
-                    ...
-                ],  # only batches/pages that succeeded via Docling; empty
-                    # list if EVERY page failed (see raise below)
-                "status": ConversionStatus,  # SUCCESS if no page_errors at all,
-                                              # PARTIAL_SUCCESS if some but not all
-                                              # batches/pages had issues
-                "page_errors": [str, ...],   # every error/recovery message,
-                                              # prefixed with the page(s) it
-                                              # came from
-                "fallback_pages": {int: str},  # 0-indexed absolute page ->
-                                                # plain text, for pages Docling
-                                                # couldn't parse even alone but
-                                                # PyMuPDF recovered
-                "pages_fully_lost": [int, ...],  # 0-indexed absolute pages
-                                                   # where NEITHER Docling
-                                                   # (even isolated) NOR the
-                                                   # PyMuPDF fallback produced
-                                                   # anything -- genuinely
-                                                   # missing content
-            }
-
-        Raises:
-            ValueError if every single batch failed (no usable content at all) --
-            same "nothing to chunk" case parse() raises on.
-        """
         converter = DoclingPDFParser._get_converter()
         batches = split_pdf_into_batches(file_path, batch_size=batch_size)
 
@@ -336,15 +239,9 @@ class DoclingPDFParser:
         pages_fully_lost: list[int] = []
 
         def _recover_failed_batch(batch) -> None:
-            """Runs the retry-then-fallback pipeline for one failed batch
-            and folds the results into the outer succeeded/page_errors/
-            fallback_pages/pages_fully_lost accumulators."""
             is_single_page = (batch.end_page - batch.start_page) <= 1
 
             if is_single_page:
-                # Already as small as it gets -- skip the redundant
-                # re-split-and-retry step and go straight to recording
-                # it as still-failed at page level.
                 still_failed_pages = [batch.start_page]
             else:
                 recovered = DoclingPDFParser._retry_batch_at_page_level(batch, converter)
@@ -381,18 +278,12 @@ class DoclingPDFParser:
                     if not hasattr(result, "document"):
                         result = next(iter(result))
 
-                    # Offset in-batch error messages back to original-document
-                    # page numbers (batch.start_page is 0-indexed into the
-                    # ORIGINAL file, e.g. batch 3 of size 5 starts at page 10).
                     batch_errors = [
                         f"[pages {batch.start_page + 1}-{batch.end_page}] {e.error_message}"
                         for e in result.errors
                     ]
 
                     if result.status == ConversionStatus.FAILURE:
-                        # 2026-07-14: previously just recorded this range as
-                        # lost and moved on. Now attempt page-level recovery
-                        # before writing the whole batch off.
                         logger.warning(
                             "Batch pages %d-%d failed outright -- retrying at "
                             "single-page level before giving up on the range.",
@@ -418,17 +309,6 @@ class DoclingPDFParser:
                     )
 
                 except Exception as e:
-                    # Catches things convert() itself raises despite
-                    # raises_on_error=False -- e.g. a hard std::bad_alloc
-                    # crash/segfault surfaced as a Python exception rather
-                    # than a clean FAILURE status. This is the whole reason
-                    # batching exists: isolate it to this batch's page range.
-                    #
-                    # 2026-07-14: this is exactly the original bug's failure
-                    # mode (std::bad_alloc on pages 19-22). Previously the
-                    # whole batch was written off here; now it goes through
-                    # the same page-level retry + fallback recovery path as
-                    # a clean FAILURE status above.
                     logger.error(
                         "Batch pages %d-%d raised during convert(): %s -- "
                         "retrying at single-page level.",
@@ -441,8 +321,6 @@ class DoclingPDFParser:
                     _recover_failed_batch(batch)
                     continue
         finally:
-            # Always clean up temp mini-PDFs, even if something above raised
-            # or the loop was interrupted partway through.
             cleanup_batches(batches)
 
         if not succeeded and not fallback_pages:
