@@ -53,14 +53,21 @@ class Settings(BaseSettings):
     # charts (e.g. described the UTMOS chart as "an excel graph of user test
     # scores") instead of transcribing labeled values, and does not reliably
     # follow structured "label: value" output instructions. Swapped to
-    # qwen2.5vl:7b, which has real document/chart-OCR-style reading ability
-    # and follows structured output formatting far more reliably. Requires
-    # `ollama pull qwen2.5vl:7b` before this takes effect. If precision on
-    # individual digits is still off, "minicpm-v" is a strong alternative
-    # worth A/B testing -- it's tuned specifically for dense document/OCR
-    # understanding rather than general image captioning.
+    # qwen2.5vl:3b (not 7b -- dev machine has a 2GB VRAM GPU, 7b won't fit).
+    # Requires `ollama pull qwen2.5vl:3b` before this takes effect. Expect
+    # this to run partly/mostly on CPU via Ollama's automatic VRAM/RAM
+    # offload -- slow (seconds, possibly tens of seconds per figure) but
+    # acceptable since do_picture_description only runs once per document
+    # at ingestion time, not per chat query. If precision on individual
+    # digits is still off at 3b, consider routing this one step to a
+    # hosted vision API (e.g. gpt-4o-mini) instead of a larger local model,
+    # since VRAM is the hard constraint here, not just this specific model.
     ENABLE_PICTURE_DESCRIPTION: bool = True
-    PICTURE_DESCRIPTION_MODEL: str = "qwen2.5vl:7b"
+    PICTURE_DESCRIPTION_MODEL: str = "qwen2.5vl:3b"
+
+    LOGO_STRIP_ENABLED: bool = True
+    LOGO_STRIP_MIN_PAGE_FRACTION: float = 0.5
+    LOGO_STRIP_MIN_PAGE_FLOOR: int = 3
 
     # ==================== API KEYS ====================
     OPENAI_API_KEY: Optional[str] = None

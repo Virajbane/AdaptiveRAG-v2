@@ -239,6 +239,12 @@ async def list_documents(
             "file_type": doc["file_type"],
             "file_size_bytes": doc["file_size_bytes"],
             "status": doc["status"],
+            "is_stale": doc.get("is_stale", False),                          # NEW —
+                                                                               # DocumentQueries.list_documents()
+                                                                               # now computes this per-doc; without
+                                                                               # forwarding it here the frontend has
+                                                                               # no way to tell a genuinely stuck
+                                                                               # "processing" doc from a healthy one.
             "chunks": doc.get("chunks", {"count": 0}),
             "chunks_failed": doc.get("chunks_failed", 0),                    # NEW
             "failed_chunk_indices": doc.get("failed_chunk_indices", []),     # NEW

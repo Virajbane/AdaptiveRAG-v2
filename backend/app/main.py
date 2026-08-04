@@ -6,6 +6,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb.client import connect_to_mongo, close_mongo_connection, get_db
+from app.db.mongodb.queries import DocumentQueries
 from app.services.retrieval.bm25_bootstrap import rebuild_bm25_indexes
 from app.services.memory.redis_client import redis_client
 from app.services.memory.long_term import LongTermMemory
@@ -49,12 +50,57 @@ async def detailed_health_check():
     return await get_system_health()
 
 
+async def _reconcile_stale_processing_documents():
+    """
+    On boot, find every document still marked 'processing' whose
+    started_at is stale (see DocumentQueries.get_stale_processing_documents
+    docstring) and flip it to 'failed' with an explanatory error.
+
+    This is what actually resolves the "stuck forever, no error, no retry
+    button" bug: those docs were left mid-flight by a killed process
+    (crash / manual restart / watchfiles reload), which never hits the
+    except-block in process_document() that would normally set
+    status='failed'. Nothing else in the system currently notices or
+    clears them, so without this sweep they sit in 'processing' forever.
+
+    Non-fatal by design, same as the BM25 rebuild below it -- a failure
+    here shouldn't block the app from starting.
+    """
+    try:
+        db = await get_db()
+        if db is None:
+            print("⚠️  Skipping stale-document reconciliation — db is None")
+            return
+
+        doc_queries = DocumentQueries(db)
+        stale_docs = await doc_queries.get_all_stale_processing_documents(timeout_minutes=10)
+
+        if not stale_docs:
+            print("✅ No stale 'processing' documents found")
+            return
+
+        for doc in stale_docs:
+            await doc_queries.update_document_status(
+                doc_id=str(doc["_id"]),
+                status="failed",
+                error="Server restarted during processing",
+            )
+        print(f"✅ Reconciled {len(stale_docs)} stale 'processing' document(s) -> failed")
+
+    except Exception as e:
+        print(f"⚠️  Stale-document reconciliation failed (non-fatal): {e}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.on_event("startup")
 async def startup():
     print("\n🚀 Starting RAG 2.0 System...")
 
     await connect_to_mongo()
     print("✅ MongoDB connected")
+
+    await _reconcile_stale_processing_documents()
 
     await redis_client.connect()
     print("✅ Redis connected")

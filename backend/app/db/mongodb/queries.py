@@ -1,6 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.db.mongodb.models import UserInDB
 
 class UserQueries:
@@ -52,8 +52,6 @@ class UserQueries:
         )
         return result.modified_count > 0
     
-from datetime import datetime
-from bson import ObjectId
 
 class DocumentQueries:
     """Document database operations"""
@@ -119,10 +117,26 @@ class DocumentQueries:
         return doc
     
     async def list_documents(self, user_id: str, skip: int = 0, limit: int = 20) -> list:
-        """List user's documents"""
+        """List user's documents, annotated with is_stale for stuck 'processing' jobs.
+
+        is_stale is computed inline here (same 10-minute cutoff that
+        get_stale_processing_documents() uses) rather than issuing a
+        second query per request. The frontend uses this to offer a
+        Retry button on a 'processing' document that is almost certainly
+        dead (background task crashed/restarted) rather than one that's
+        just still genuinely running.
+        """
         docs = await self.collection.find(
             {"user_id": user_id}
         ).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+
+        stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+        for doc in docs:
+            doc["is_stale"] = (
+                doc.get("status") == "processing"
+                and doc.get("started_at") is not None
+                and doc.get("started_at") < stale_cutoff
+            )
         return docs
     
     async def mark_processing_started(self, doc_id: str) -> bool:
@@ -202,13 +216,27 @@ class DocumentQueries:
         Used by the /documents/{doc_id}/retry endpoint and can also back
         a "stuck uploads" indicator in the frontend.
         """
-        from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(minutes=timeout_minutes)
         docs = await self.collection.find({
             "user_id": user_id,
             "status": "processing",
             "started_at": {"$ne": None, "$lt": cutoff},
         }).to_list(length=100)
+        return docs
+
+    async def get_all_stale_processing_documents(self, timeout_minutes: int = 10) -> list:
+        """
+        Same staleness check as get_stale_processing_documents(), but
+        across all users (no user_id filter) -- for the app-startup
+        reconciliation sweep in main.py, which has no single user to
+        scope to. Per-user code paths (e.g. the retry endpoint) should
+        keep using get_stale_processing_documents(); this is startup-only.
+        """
+        cutoff = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        docs = await self.collection.find({
+            "status": "processing",
+            "started_at": {"$ne": None, "$lt": cutoff},
+        }).to_list(length=1000)
         return docs
 
     async def delete_document(self, doc_id: str, user_id: str) -> bool:

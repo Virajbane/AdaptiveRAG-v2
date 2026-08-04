@@ -32,28 +32,100 @@ BUDGET_SAFETY_MARGIN_TOKENS = 50
 # because the embedded "2" was treated as an unverified numeric claim.
 _NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
 
+# 2026-08-04 fix (Q16 root cause): matches a single "label=value" table
+# field, e.g. "FullDuplexBench 1.5.Lat. \u2193=826" as produced by
+# DoclingChunker._chunk_table(). Table rows are comma-separated on a
+# single line ("Row [Lychee-FD]: Stop.=570, Lat.=826, ..."), so without
+# this, the row-level span check below treats every field in the row as
+# one span -- see _numeric_claims_grounded's docstring for why that's
+# not fine-grained enough.
+_KV_RE = re.compile(r'([^,]+?=[^,]+)')
+
+# Matches a DoclingChunker table-row line, e.g.
+# "Row [Lychee-FD (Ours)]: FDBench.SRR \u2191=86.3, ..." -- captures the
+# entity label and the rest of the fields separately. Table rows are
+# emitted as ONE line (no embedded newlines), which matters below: this
+# line must NOT be run through the prose sentence-splitter, because
+# DoclingChunker's own column names contain periods that aren't sentence
+# boundaries (e.g. "FullDuplexBench 1.5.Lat."). Splitting a table row on
+# '.' the same way prose is split shreds it into meaningless fragments
+# *before* the comma/field split ever runs -- confirmed by direct testing
+# against real Table 2 data; an earlier version of this fix did exactly
+# that and silently broke both the correct and incorrect test cases.
+_ROW_LINE_RE = re.compile(r'^\s*Row \[(.*?)\]:\s*(.*)$')
+
+_QUESTION_STOPWORDS = {
+    "how", "what", "which", "who", "whom", "when", "where", "why",
+    "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
+}
+
+
+def _extract_entities(question: str) -> list:
+    # crude entity extraction: capitalized multi-char tokens from the
+    # question (catches things like "Freeze-Omni", "Moshi", "Lychee-FD",
+    # "Table 1"). Not real NER, but cheap and matches the report's
+    # observed failure cases. Filter out common sentence-initial question
+    # words that get capitalized purely by position, not because they're
+    # proper nouns.
+    return [
+        e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
+        if e.lower() not in _QUESTION_STOPWORDS
+    ]
+
 
 def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     """If a number in the answer never appears anywhere in the context
     actually handed to the LLM, it didn't come from that context --
     it's either training-data recall or invention.
 
-    2026-07-14 fix: the original version only checked substring presence
-    of the number anywhere in context ("num in context"). That's too
-    weak -- it can't tell WHICH entity a number is attached to. Confirmed
-    root cause of the UTMOS eval failures (answer_utmos_freezeomni_1,
-    answer_utmos_moshi_1): both wrong answers reused "4.50" -- which IS
-    present in context (it's Lychee-FD's own score sitting a few lines
-    away) -- so the old check passed even though "4.50" was never
-    actually paired with "Freeze-Omni" or "Moshi" anywhere in the
-    source text. The guard was checking existence, not attribution.
+    2026-07-14 fix: require that for each number in the answer, at least
+    one context SPAN contains BOTH that number AND an entity mentioned in
+    the question -- not just "does the number appear anywhere in the
+    whole context blob." This caught the UTMOS eval failures where a
+    real number (4.50) was reused for the wrong entity (Freeze-Omni/
+    Moshi) because it existed in context, just attached to a different
+    model (Lychee-FD) a few lines away.
 
-    Fix: split context into line/sentence-level spans, and require that
-    for each number in the answer, at least one context span contains
-    BOTH that number AND an entity mentioned in the question. This is a
-    crude string-proximity check (not real entity linking/NER), but it
-    directly catches the observed failure mode: a number that's real but
-    borrowed from a different entity's row/sentence.
+    2026-08-04 fix (Q16 root cause): the 2026-07-14 fix's span boundaries
+    (split on '.' / newline) were still too coarse for table rows.
+    DoclingChunker._chunk_table() serializes an ENTIRE row -- every
+    metric for one model, e.g. FDBench + FullDuplexBench 1.0 +
+    FullDuplexBench 1.5, 16 fields total -- as ONE comma-separated line
+    with no periods or newlines inside it. That means the row-level span
+    check verified the right MODEL but not the right FIELD: asked for
+    Lychee-FD's "Lat." (826), the model answered "570" (Lychee-FD's
+    "Stop." value from the SAME row) and the old check passed, because
+    570 and "Lychee-FD" do co-occur -- just not in the same field.
+
+    Fix: process the context LINE BY LINE first (table rows are always
+    a single line with no embedded newline). Any line matching the
+    "Row [entity]: field=value, field=value, ..." shape gets split on
+    COMMAS into one span per field, with the entity label re-attached to
+    each fragment -- table column names contain periods that are NOT
+    sentence boundaries (e.g. "FullDuplexBench 1.5.Lat."), so table-row
+    lines must never go through the prose period-splitter, or the row
+    gets shredded before the field split even runs. Lines that are NOT a
+    table row (ordinary prose) still get the original sentence-level
+    period split. This makes "Stop.=570" and "Lat.=826" two separate,
+    non-interchangeable spans instead of one blob that lets a number
+    from either field satisfy the check.
+
+    Note (not fixed here, flagged for awareness): this still only
+    confirms a number is attached to the right ENTITY -- it does not
+    confirm the specific FIELD the LLM chose is what the question
+    actually meant when two fields on the SAME entity's row both pass
+    (e.g. asked for Lychee-FD's "Lat.", an answer of Lychee-FD's "Stop."
+    value still passes this check, since both co-occur with "Lychee-FD"
+    in their own field-level span). Tested directly: a field-label
+    text-matching heuristic (matching question words like "latency"
+    against column labels like "Lat.") was tried and rejected -- shared
+    group-name tokens (e.g. "FullDuplexBench" appearing in every field
+    under that benchmark) pollute the match and make it match every
+    field indiscriminately, not just the right one. Resolving
+    same-entity, same-row field ambiguity needs a prompt-level fix
+    (explicit column-label matching instruction to the LLM, see
+    ANSWER_PROMPT) and/or retrieving the disambiguating prose paragraph
+    alongside the table row -- not a mechanical grounding check.
 
     If the question doesn't contain any capitalized entity-like tokens
     (e.g. a purely conceptual question with no named entity), we fall
@@ -64,23 +136,7 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     if not numbers_in_answer:
         return True
 
-    # crude entity extraction: capitalized multi-char tokens from the
-    # question (catches things like "Freeze-Omni", "Moshi", "Lychee-FD",
-    # "Table 1"). Not real NER, but cheap and matches the report's
-    # observed failure cases. Filter out common sentence-initial question
-    # words that get capitalized purely by position, not because they're
-    # proper nouns -- otherwise a plain question like "How many layers
-    # does the model use?" gets "How" treated as an entity, and since
-    # "how" never appears in context, every number in the answer would
-    # be wrongly declined.
-    _QUESTION_STOPWORDS = {
-        "how", "what", "which", "who", "whom", "when", "where", "why",
-        "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
-    }
-    entities = [
-        e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
-        if e.lower() not in _QUESTION_STOPWORDS
-    ]
+    entities = _extract_entities(question)
 
     if not entities:
         # No named entity to anchor against -- fall back to the
@@ -88,21 +144,36 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
         # every number-containing answer to a non-comparison question.
         return all(num in context for num in numbers_in_answer)
 
-    # Split context into sentence/line-level spans so we can check
-    # whether a number and an entity actually co-occur in the SAME
-    # span, rather than just both existing somewhere in the whole blob.
-    # Split on '.' only when NOT between two digits, so decimal numbers
-    # like "4.21" don't get fractured into separate spans.
-    context_spans = re.split(r"(?<!\d)\.(?!\d)|\n", context)
+    # Process line by line. Table-row lines (DoclingChunker._chunk_table
+    # output) are split on commas into per-field spans, never on periods
+    # -- their own column names contain periods that aren't sentence
+    # boundaries. Non-table lines still get the original sentence-level
+    # period split (skip decimals) from the 2026-07-14 fix.
+    fine_spans = []
+    for line in context.split("\n"):
+        row_match = _ROW_LINE_RE.match(line)
+        if row_match:
+            row_entity = row_match.group(1)
+            fields_text = row_match.group(2)
+            kv_fragments = _KV_RE.findall(fields_text)
+            if kv_fragments:
+                fine_spans.extend(
+                    f"Row [{row_entity}]: {frag}" for frag in kv_fragments
+                )
+                continue
+            # Row-shaped line but no parseable fields -- fall through
+            # and treat as plain text rather than dropping it silently.
+        for sentence in re.split(r"(?<!\d)\.(?!\d)", line):
+            if sentence.strip():
+                fine_spans.append(sentence)
 
     # Drop entities that appear in EVERY numbered span (e.g. a metric
-    # name like "UTMOS" mentioned in every row, or a "[Source N]" label
-    # digit that isn't a real fact). Those don't discriminate between
-    # rows, so matching against them defeats the point of the check --
-    # keep only entities that appear in a strict subset of spans, i.e.
-    # ones that actually distinguish which row a number belongs to.
+    # name mentioned in every row, or a "[Source N]" label digit that
+    # isn't a real fact). Those don't discriminate between rows/fields --
+    # keep only entities that appear in a strict subset, i.e. ones that
+    # actually distinguish which row/field a number belongs to.
     spans_with_numbers = [
-        s for s in context_spans
+        s for s in fine_spans
         if re.search(r"\d", s) and not re.match(r"^\s*\[.*\]\s*$", s)
     ]
     discriminating = [
@@ -114,7 +185,7 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     for num in numbers_in_answer:
         num_and_entity_cooccur = any(
             num in span and any(e.lower() in span.lower() for e in entities)
-            for span in context_spans
+            for span in fine_spans
         )
         if not num_and_entity_cooccur:
             return False
@@ -342,15 +413,19 @@ class AnswerAgent(BaseAgent):
             # 2026-07-14 fix: pass state.question through so the grounding
             # check can anchor numbers to the entity actually being asked
             # about, not just check raw existence anywhere in context.
-            # See _numeric_claims_grounded docstring for the UTMOS
-            # entity-attribution bug this closes.
+            # 2026-08-04 fix: span-splitting inside _numeric_claims_grounded
+            # now also breaks table rows into per-field spans, so a number
+            # must match both the right ENTITY and the right FIELD within
+            # that entity's row, not just the right entity. See
+            # _numeric_claims_grounded's docstring for the Q16 Stop./Lat.
+            # row-bleed bug this closes.
             declined_on_ungrounded_number = not _numeric_claims_grounded(
                 state.answer, context, state.question
             )
             if declined_on_ungrounded_number:
                 print(
                     f"[ANSWER] Numeric claim not found verbatim in context "
-                    f"(or not attributed to the entity asked about) "
+                    f"(or not attributed to the entity/field asked about) "
                     f"— declining rather than shipping unverified number. "
                     f"Original answer was: {state.answer!r}"
                 )
@@ -359,7 +434,7 @@ class AnswerAgent(BaseAgent):
                     "a specific number for this with confidence from the retrieved "
                     "text. This may be a figure or chart value that wasn't "
                     "extracted as readable text, or the number belongs to a "
-                    "different entity than the one asked about."
+                    "different entity or field than the one asked about."
                 )
 
             # NOTE: sources built from top_docs (the docs actually sent to
