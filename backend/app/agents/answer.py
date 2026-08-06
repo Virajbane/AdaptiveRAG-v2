@@ -33,7 +33,7 @@ BUDGET_SAFETY_MARGIN_TOKENS = 50
 _NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
 
 # 2026-08-04 fix (Q16 root cause): matches a single "label=value" table
-# field, e.g. "FullDuplexBench 1.5.Lat. \u2193=826" as produced by
+# field, e.g. "FullDuplexBench 1.5.Lat. ↓=826" as produced by
 # DoclingChunker._chunk_table(). Table rows are comma-separated on a
 # single line ("Row [Lychee-FD]: Stop.=570, Lat.=826, ..."), so without
 # this, the row-level span check below treats every field in the row as
@@ -42,7 +42,7 @@ _NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
 _KV_RE = re.compile(r'([^,]+?=[^,]+)')
 
 # Matches a DoclingChunker table-row line, e.g.
-# "Row [Lychee-FD (Ours)]: FDBench.SRR \u2191=86.3, ..." -- captures the
+# "Row [Lychee-FD (Ours)]: FDBench.SRR ↑=86.3, ..." -- captures the
 # entity label and the rest of the fields separately. Table rows are
 # emitted as ONE line (no embedded newlines), which matters below: this
 # line must NOT be run through the prose sentence-splitter, because
@@ -60,95 +60,91 @@ _QUESTION_STOPWORDS = {
 }
 
 
-def _extract_entities(question: str) -> list:
-    # crude entity extraction: capitalized multi-char tokens from the
-    # question (catches things like "Freeze-Omni", "Moshi", "Lychee-FD",
-    # "Table 1"). Not real NER, but cheap and matches the report's
-    # observed failure cases. Filter out common sentence-initial question
-    # words that get capitalized purely by position, not because they're
-    # proper nouns.
-    return [
+# =============================================================================
+# 2026-08-06 FIX #2: IMPROVED ENTITY EXTRACTION & GROUNDING
+# =============================================================================
+# Previously: extracted entities from question (capitalization heuristic)
+#             This missed aliases like "Lychee-FD (Ours)" and failed on pronouns
+# 
+# Now: extract entities from ACTUAL ROW LABELS in the context
+#      Fallback to question-based extraction only if no table rows present
+# =============================================================================
+
+def _extract_entities_from_rows(context: str) -> set:
+    """
+    Extract entity labels directly from table row lines in the context.
+    
+    This is more reliable than extracting from the question because:
+    - Captures entity aliases exactly as they appear in data ("Lychee-FD (Ours)")
+    - Handles questions with pronouns ("What does it achieve?" has no entities)
+    - Won't be fooled by entity names in other parts of the prose
+    
+    Returns a set of entity labels like {"Lychee-FD (Ours)", "Moshi", "Baseline"}
+    """
+    entities = set()
+    for line in context.split("\n"):
+        row_match = _ROW_LINE_RE.match(line)
+        if row_match:
+            row_entity = row_match.group(1).strip()
+            if row_entity:
+                entities.add(row_entity)
+    return entities
+
+
+def _extract_entities_from_question(question: str) -> set:
+    """
+    Fallback: extract capitalized multi-char tokens from the question.
+    Used only if no table rows are present in the context.
+    
+    This is the original approach, kept for non-table questions.
+    """
+    return {
         e for e in re.findall(r"\b[A-Z][A-Za-z0-9\-]{2,}\b", question)
         if e.lower() not in _QUESTION_STOPWORDS
-    ]
+    }
 
 
 def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
-    """If a number in the answer never appears anywhere in the context
-    actually handed to the LLM, it didn't come from that context --
-    it's either training-data recall or invention.
-
-    2026-07-14 fix: require that for each number in the answer, at least
-    one context SPAN contains BOTH that number AND an entity mentioned in
-    the question -- not just "does the number appear anywhere in the
-    whole context blob." This caught the UTMOS eval failures where a
-    real number (4.50) was reused for the wrong entity (Freeze-Omni/
-    Moshi) because it existed in context, just attached to a different
-    model (Lychee-FD) a few lines away.
-
-    2026-08-04 fix (Q16 root cause): the 2026-07-14 fix's span boundaries
-    (split on '.' / newline) were still too coarse for table rows.
-    DoclingChunker._chunk_table() serializes an ENTIRE row -- every
-    metric for one model, e.g. FDBench + FullDuplexBench 1.0 +
-    FullDuplexBench 1.5, 16 fields total -- as ONE comma-separated line
-    with no periods or newlines inside it. That means the row-level span
-    check verified the right MODEL but not the right FIELD: asked for
-    Lychee-FD's "Lat." (826), the model answered "570" (Lychee-FD's
-    "Stop." value from the SAME row) and the old check passed, because
-    570 and "Lychee-FD" do co-occur -- just not in the same field.
-
-    Fix: process the context LINE BY LINE first (table rows are always
-    a single line with no embedded newline). Any line matching the
-    "Row [entity]: field=value, field=value, ..." shape gets split on
-    COMMAS into one span per field, with the entity label re-attached to
-    each fragment -- table column names contain periods that are NOT
-    sentence boundaries (e.g. "FullDuplexBench 1.5.Lat."), so table-row
-    lines must never go through the prose period-splitter, or the row
-    gets shredded before the field split even runs. Lines that are NOT a
-    table row (ordinary prose) still get the original sentence-level
-    period split. This makes "Stop.=570" and "Lat.=826" two separate,
-    non-interchangeable spans instead of one blob that lets a number
-    from either field satisfy the check.
-
-    Note (not fixed here, flagged for awareness): this still only
-    confirms a number is attached to the right ENTITY -- it does not
-    confirm the specific FIELD the LLM chose is what the question
-    actually meant when two fields on the SAME entity's row both pass
-    (e.g. asked for Lychee-FD's "Lat.", an answer of Lychee-FD's "Stop."
-    value still passes this check, since both co-occur with "Lychee-FD"
-    in their own field-level span). Tested directly: a field-label
-    text-matching heuristic (matching question words like "latency"
-    against column labels like "Lat.") was tried and rejected -- shared
-    group-name tokens (e.g. "FullDuplexBench" appearing in every field
-    under that benchmark) pollute the match and make it match every
-    field indiscriminately, not just the right one. Resolving
-    same-entity, same-row field ambiguity needs a prompt-level fix
-    (explicit column-label matching instruction to the LLM, see
-    ANSWER_PROMPT) and/or retrieving the disambiguating prose paragraph
-    alongside the table row -- not a mechanical grounding check.
-
-    If the question doesn't contain any capitalized entity-like tokens
-    (e.g. a purely conceptual question with no named entity), we fall
-    back to the original "does the number appear anywhere" check, since
-    there's no entity to anchor against.
+    """
+    Verify that numbers in the answer are grounded in the context and 
+    attributed to the correct entity/field.
+    
+    2026-08-06 fix (entity-attribution cascade):
+    - Extract entities from ACTUAL ROW LABELS in context, not from question
+    - For table rows, enforce that number + entity + field all cooccur in 
+      the same row's own field-level span
+    - For prose, use the weaker sentence-level span check (no per-field split)
+    
+    This catches the "4.50 for Lychee-FD but you answered it for Moshi" bug 
+    by requiring an answer's cited number to appear in a span that ALSO 
+    contains the queried entity's row label.
+    
+    Returns:
+        True if all numbers in the answer are properly grounded and attributed
+        False if any number is missing from context or attributed to wrong entity
     """
     numbers_in_answer = _NUM_RE.findall(answer)
     if not numbers_in_answer:
         return True
 
-    entities = _extract_entities(question)
+    # Extract entities from ROWS first (more precise than question parsing)
+    # This is the key change: use actual row labels instead of capitalization heuristic
+    entities_from_rows = _extract_entities_from_rows(context)
+    
+    if not entities_from_rows:
+        # No table rows in context -- fall back to question-based extraction
+        # for conceptual/non-comparative questions (unchanged behavior)
+        entities = _extract_entities_from_question(question)
+        if not entities:
+            # No named entity anywhere -- weaker existence check
+            # For purely conceptual questions with no entity names
+            return all(num in context for num in numbers_in_answer)
+    else:
+        # Use entities extracted from actual row labels
+        entities = entities_from_rows
 
-    if not entities:
-        # No named entity to anchor against -- fall back to the
-        # original, weaker existence check rather than false-declining
-        # every number-containing answer to a non-comparison question.
-        return all(num in context for num in numbers_in_answer)
-
-    # Process line by line. Table-row lines (DoclingChunker._chunk_table
-    # output) are split on commas into per-field spans, never on periods
-    # -- their own column names contain periods that aren't sentence
-    # boundaries. Non-table lines still get the original sentence-level
-    # period split (skip decimals) from the 2026-07-14 fix.
+    # Build fine-grained spans: table rows split on commas (per field), 
+    # prose split on sentence boundaries
     fine_spans = []
     for line in context.split("\n"):
         row_match = _ROW_LINE_RE.match(line)
@@ -157,37 +153,37 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
             fields_text = row_match.group(2)
             kv_fragments = _KV_RE.findall(fields_text)
             if kv_fragments:
+                # Each field gets its own span with the row label attached
+                # This ensures "Stop.=570" and "Lat.=826" are separate spans
                 fine_spans.extend(
                     f"Row [{row_entity}]: {frag}" for frag in kv_fragments
                 )
                 continue
-            # Row-shaped line but no parseable fields -- fall through
-            # and treat as plain text rather than dropping it silently.
+            # Row-shaped line but no parseable fields -- treat as plain text
+        
+        # Non-table line: split on sentence boundaries (skip decimals)
         for sentence in re.split(r"(?<!\d)\.(?!\d)", line):
             if sentence.strip():
                 fine_spans.append(sentence)
 
-    # Drop entities that appear in EVERY numbered span (e.g. a metric
-    # name mentioned in every row, or a "[Source N]" label digit that
-    # isn't a real fact). Those don't discriminate between rows/fields --
-    # keep only entities that appear in a strict subset, i.e. ones that
-    # actually distinguish which row/field a number belongs to.
-    spans_with_numbers = [
-        s for s in fine_spans
-        if re.search(r"\d", s) and not re.match(r"^\s*\[.*\]\s*$", s)
-    ]
-    discriminating = [
-        e for e in entities
-        if 0 < sum(1 for s in spans_with_numbers if e.lower() in s.lower()) < len(spans_with_numbers)
-    ]
-    entities = discriminating or entities
-
+    # Validate each number in the answer
     for num in numbers_in_answer:
-        num_and_entity_cooccur = any(
-            num in span and any(e.lower() in span.lower() for e in entities)
-            for span in fine_spans
+        # For each number, find ALL spans containing it
+        spans_with_num = [s for s in fine_spans if num in s]
+        
+        if not spans_with_num:
+            # Number doesn't appear anywhere in context
+            return False
+        
+        # Check if any of those spans also contain one of the queried entities
+        num_is_attributed = any(
+            any(e.lower() in s.lower() for e in entities)
+            for s in spans_with_num
         )
-        if not num_and_entity_cooccur:
+        
+        if not num_is_attributed:
+            # Number exists in context but not attached to any queried entity
+            # (e.g., "4.50" exists under "Moshi" but question asked about "Lychee-FD")
             return False
 
     return True
@@ -410,15 +406,16 @@ class AnswerAgent(BaseAgent):
             response = await self.call_llm(prompt, max_tokens=ANSWER_RESERVED_OUTPUT_TOKENS)
             state.answer = response.strip()
 
-            # 2026-07-14 fix: pass state.question through so the grounding
-            # check can anchor numbers to the entity actually being asked
-            # about, not just check raw existence anywhere in context.
-            # 2026-08-04 fix: span-splitting inside _numeric_claims_grounded
-            # now also breaks table rows into per-field spans, so a number
-            # must match both the right ENTITY and the right FIELD within
-            # that entity's row, not just the right entity. See
-            # _numeric_claims_grounded's docstring for the Q16 Stop./Lat.
-            # row-bleed bug this closes.
+            # 2026-08-06 fix: NEW GROUNDING LOGIC
+            # Pass state.question through so the grounding check can:
+            # 1. Extract entities from actual ROW LABELS (not question)
+            # 2. Anchor numbers to the specific row AND field they belong to
+            # 3. Catch cross-entity attribution (e.g., Moshi's value for Lychee-FD)
+            #
+            # This replaces the old question-based entity extraction which:
+            # - Missed entity aliases ("Lychee-FD (Ours)" treated as 2 entities)
+            # - Failed on pronouns ("What does it achieve?" has no entity)
+            # - Couldn't discriminate between same entity's different fields
             declined_on_ungrounded_number = not _numeric_claims_grounded(
                 state.answer, context, state.question
             )

@@ -89,6 +89,58 @@ def _is_metric_style_query(question: str) -> bool:
 # until that ingestion-side fix lands.
 _TABLE_ROW_PATTERN = re.compile(r"^\s*Row\s*\[", re.IGNORECASE)
 
+# 2026-08-06 FIX #3 follow-up: the guarantee above ("any table-row chunk
+# survives, regardless of score") had a blind spot -- it guarantees EVERY
+# row chunk, not just the one for the entity actually asked about. If
+# retrieval surfaces both "Row [Lychee-FD]: UTMOS=4.50" and
+# "Row [Moshi]: UTMOS=4.44" (adjacent rows in the same benchmark table,
+# so both are plausible retrieval hits), the old logic force-included
+# BOTH into the final 5-chunk context -- which is exactly the
+# entity-attribution mix-up traced in the eval (fab_01/fab_02: "4.50
+# appears in context but is not attributed to the entity asked about").
+# hybrid_search.py's filter_comparison_table_rows() only capped REPEATS
+# of the same entity, so two different entities each appearing once each
+# sailed through untouched, and this guarantee step then blindly forwarded
+# whatever row chunks it was handed. Fix: only guarantee row chunks whose
+# entity is actually named in the question (by canonical name, stripping
+# qualifiers like "(Ours)"/"w/o Sem"), unless the question is an explicit
+# comparison. If no entity can be identified in the question at all, fall
+# back to the original behavior (guarantee whatever row chunks came back)
+# rather than dropping everything blind.
+_ROW_ENTITY_PATTERN = re.compile(r"^\s*Row\s*\[(.*?)\]", re.IGNORECASE)
+
+_COMPARISON_KEYWORDS = {
+    "compare", "vs", "versus", "better", "worse", "difference",
+    "outperform", "beat", "surpass", "how much", "which is",
+    "contrast", "similar", "differ", "both",
+}
+
+
+def _row_entity(doc: dict) -> str | None:
+    m = _ROW_ENTITY_PATTERN.match(doc.get("text", ""))
+    return m.group(1) if m else None
+
+
+def _canonical_entity_name(entity: str) -> str:
+    """Strip qualifiers like "(Ours)", "w/o Sem", trailing " -" so
+    "Lychee-FD (Ours) w/o Sem -" and "Lychee-FD" match as the same
+    entity when checked against the question text."""
+    canonical = re.split(r"\(| w/o |w/o ", entity, maxsplit=1)[0]
+    return canonical.strip(" -").strip()
+
+
+def _entity_matches_question(entity: str, question: str) -> bool:
+    canonical = _canonical_entity_name(entity).lower()
+    return bool(canonical) and canonical in question.lower()
+
+
+def _is_comparison_query(question: str) -> bool:
+    q_lower = question.lower()
+    return (
+        any(kw in q_lower for kw in _COMPARISON_KEYWORDS)
+        or question.count(" and ") + question.count(" vs ") > 0
+    )
+
 
 def _is_table_row_chunk(doc: dict) -> bool:
     return bool(_TABLE_ROW_PATTERN.match(doc.get("text", "")))
@@ -217,8 +269,41 @@ class RetrieverAgent(BaseAgent):
             # reranker underrates this chunk format even when it's the
             # one chunk with the actual answer). Remaining slots are
             # filled by rerank score as before.
+            #
+            # 2026-08-06 FIX #3 follow-up: the guarantee is now scoped to
+            # row chunks whose entity is actually named in the question
+            # (unless it's an explicit comparison question, or no entity
+            # could be identified in the question at all -- see notes
+            # above _ROW_ENTITY_PATTERN). This is what actually stops the
+            # cross-entity mix-up; hybrid_search's dedup filter alone
+            # can't catch two DIFFERENT entities each appearing once.
             if is_metric_query and len(candidates) > FINAL_CONTEXT_SIZE:
-                row_chunks = [c for c in candidates if _is_table_row_chunk(c)]
+                is_comparison = _is_comparison_query(question)
+                all_row_chunks = [c for c in candidates if _is_table_row_chunk(c)]
+
+                entities_matched = {
+                    _row_entity(c) for c in all_row_chunks
+                    if _row_entity(c) and _entity_matches_question(_row_entity(c), question)
+                }
+
+                if is_comparison or not entities_matched:
+                    # Can't (or shouldn't) narrow by entity -- keep old
+                    # behavior: guarantee every row chunk that survived
+                    # retrieval, regardless of entity.
+                    row_chunks = all_row_chunks
+                else:
+                    row_chunks = [
+                        c for c in all_row_chunks
+                        if _row_entity(c) in entities_matched
+                    ]
+                    dropped = len(all_row_chunks) - len(row_chunks)
+                    if dropped:
+                        print(
+                            f"[RETRIEVER] Dropped {dropped} row chunk(s) for "
+                            f"entities not asked about (question refers to "
+                            f"{sorted(entities_matched)})"
+                        )
+
                 other_chunks = sorted(
                     (c for c in candidates if not _is_table_row_chunk(c)),
                     key=_rerank_key, reverse=True,

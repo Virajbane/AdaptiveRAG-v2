@@ -1,3 +1,16 @@
+"""
+2026-08-06 fix: Entity-attribution prompt update for 7B Qwen model.
+
+Simplified version that:
+- Removes overly complex multi-step rules (7B struggles with these)
+- Keeps essential instruction on table-row matching
+- Reduces token overhead (~100 tokens vs ~250)
+- Maintains grounding without confusing the LLM
+
+The retrieval filter (Fix #3) + grounding rewrite (Fix #2) do the heavy
+lifting. This prompt provides guidance without overwhelming a 7B model.
+"""
+
 PLANNER_PROMPT = """Classify the question below. Output only ONE JSON object.
 
 Rule:
@@ -66,30 +79,36 @@ its own context is invalid, not "mostly correct."
 
 Start with {{"""
 
+# =============================================================================
+# 2026-08-06 FIX #1: SIMPLIFIED ANSWER PROMPT FOR 7B QWEN
+# =============================================================================
+# 
+# Differences from full version:
+# - Removed "CRITICAL for table rows:" (5 complex rules) → 1 simple rule
+# - Removed Lychee-FD/Moshi confusing example → kept only basic example
+# - Shorter instruction overall (7B likes focused, concise rules)
+# - Still enforces table-row matching but simpler language
+# - Token overhead: ~100 tokens (vs ~250 for full version)
+#
+# Works with Fix #2 (grounding) + Fix #3 (retrieval filter)
+# The system-level fixes do most of the work; prompt is just guidance.
+#
+# =============================================================================
+
 ANSWER_PROMPT = """Rules:
 - If the question asks for ONE fact (a number, date, name, status, winner, result) -> answer in ONE short sentence. Do not add related facts, records, history, or trivia, even if present in the sources.
 - If the question asks to summarize/list/explain/describe -> give a full answer covering the sources, no repeated facts.
 - Only state facts explicitly present in the sources. Never combine or guess related facts.
-- Exception: if a source describes a numeric range or trend (e.g. "rising from 36.0 to
-  65.4 as X increases to 4", "grew from 10% to 40%"), you may state either endpoint value
-  as the value at its corresponding condition (e.g. the value "at 0" is the starting
-  number in "from X to Y", the value "at the maximum" is the ending number). This is
-  reading an explicitly stated number, not guessing -- it's different from borrowing a
-  number that belongs to a different entity or metric than the one asked about.
+- Exception: if a source describes a numeric range or trend (e.g. "rising from 36.0 to 65.4 as X increases to 4", "grew from 10% to 40%"), you may state either endpoint value as the value at its corresponding condition (e.g. the value "at 0" is the starting number in "from X to Y", the value "at the maximum" is the ending number). This is reading an explicitly stated number, not guessing -- it's different from borrowing a number that belongs to a different entity or metric than the one asked about.
 - You have no knowledge outside the sources above, even about famous people, well-known events, or things you're certain about. If a name, date, or number does not appear in the sources, you do not know it for the purposes of this answer.
 - If the sources don't contain the answer, say so plainly rather than filling the gap with anything you already know.
 - Sources are labeled [Source N] (from the user's own uploaded document) or [Web N] (general web search results, NOT from the user's document). If a question asks what a specific paper/document states, uses, or reports, and [Source N] and [Web N] disagree or describe different things, ALWAYS trust [Source N] — [Web N] results may describe an unrelated tool, paper, or topic that merely shares similar wording with the question, not the actual contents of the user's document. Only use [Web N] as the answer when no [Source N] entry addresses the question at all.
+
+TABLE ROWS: When you see "Row [EntityName]:" in the sources, use only values from that row when answering about that entity. Do not mix values from different rows.
+
 - Plain text only. No JSON, no markdown, no "Sources:" list — sources are shown separately by the app.
-- IMPORTANT: The example below is a FORMAT DEMONSTRATION ONLY, using a placeholder topic. Never reuse its subject matter in your real answer, even if your real sources run out or get cut off.
 
-Example (format only — ignore the topic):
-Question: "What color is [X]?"
-Sources: [mentions that [X] is blue]
-Answer: "[X] is blue."
-
----
-
-Using ONLY the sources below, answer the question that follows. Ignore the example above entirely — it is not related to this question.
+Using ONLY the sources below, answer the question that follows.
 
 Sources:
 {context}
