@@ -1,3 +1,4 @@
+import hashlib
 from typing import Any, Optional, Annotated
 from dataclasses import dataclass, field
 
@@ -32,6 +33,22 @@ def _merge_error(a: str, b: str) -> str:
     return f"{a} | {b}"
 
 
+def _compute_hash(obj: Any) -> str:
+    """
+    Deterministic hash of an object for change detection.
+    
+    Used to detect if retriever/planner/answer produced identical output
+    across retries. If hashes match, stop retrying (early stop logic).
+    Converts to JSON string to ensure determinism.
+    """
+    import json
+    try:
+        s = json.dumps(obj, sort_keys=True, default=str)
+        return hashlib.md5(s.encode()).hexdigest()[:12]
+    except (TypeError, ValueError):
+        return hashlib.md5(str(obj).encode()).hexdigest()[:12]
+
+
 @dataclass
 class AgentState:
     """
@@ -41,6 +58,10 @@ class AgentState:
     - Created when user sends a message
     - Destroyed after response is sent
     - NOT persisted to database
+    
+    2026-07-XX: Added failure_type classification, independent retry
+    counters per component, and hash-based change detection to enable
+    smart routing and early stopping.
     """
 
     def copy(self):
@@ -65,7 +86,7 @@ class AgentState:
     web_results: list[dict] = field(default_factory=list)
     retrieval_rejected: bool = False   
     
-     # ── Metadata short-circuit ───────────────────────────────────────────
+    # ── Metadata short-circuit ───────────────────────────────────────────
     metadata_answer: dict = field(default_factory=dict)
     
     # ── Tool results ─────────────────────────────────────────────────────
@@ -75,12 +96,33 @@ class AgentState:
     is_valid: bool = False
     validation_issues: list[str] = field(default_factory=list)
     critic_confidence: float = 0.0   # 0-1; set by CriticAgent each run
+    
+    # ── Failure classification ────────────────────────────────────────────
+    # Set by CriticAgent. Determines which component should be retried.
+    # Values: "generation", "retrieval", "planning", "tool", "unknown"
+    # If "unknown", the answer is returned as-is (no further retries).
+    failure_type: str = ""
 
-    # ── Retry control ────────────────────────────────────────────────────
-    # Guards the Critic → Answer retry loop in the LangGraph StateGraph.
-    # Without this, a persistently low-confidence query would retry forever
-    # instead of degrading gracefully.
+    # ── Independent retry counters ────────────────────────────────────────
+    # Each component tracks its own retry budget. Prevents retrying a
+    # component that's already exhausted its attempts.
+    planner_retry_count: int = 0
+    retriever_retry_count: int = 0
+    answer_retry_count: int = 0
+    tool_retry_count: int = 0
+    
+    # Legacy counter kept for backward compatibility, but not actively used
+    # in the new routing logic.
     retry_count: int = 0
+
+    # ── Change detection hashes ───────────────────────────────────────────
+    # Stored after each component runs. If the next retry produces an
+    # identical hash, we stop retrying (early stop) instead of burning
+    # retry budget on unchanged output.
+    last_planning_hash: str = ""    # hash of (plan, sources_needed)
+    last_retrieval_hash: str = ""   # hash of retrieved_docs scores/IDs
+    last_answer_hash: str = ""      # hash of answer text
+    last_tool_result_hash: str = "" # hash of tool_results dict
 
     # ── Final answer ─────────────────────────────────────────────────────
     answer: str = ""
