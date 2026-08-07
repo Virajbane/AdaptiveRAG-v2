@@ -1,68 +1,38 @@
 import re
 import json
 from app.agents.base import BaseAgent
-from app.agents.state import AgentState
+from app.agents.state import AgentState, _compute_hash
 from app.agents.prompts import CRITIC_PROMPT
 
 # --------------------------------------------------------------------------
-# 2026-07-04 bug: Critic scoring a failed generation as if it were valid
-# (existing comment block unchanged, see below)
+# Critic Agent with failure_type classification
 # --------------------------------------------------------------------------
 _FAILED_ANSWER = "Sorry, I couldn't generate an answer."
+
+# Threshold for "strong grounding" — if >= this, facts in answer are grounded
+_GROUNDING_THRESHOLD_STRONG = 0.8
+_GROUNDING_THRESHOLD_WEAK = 0.2
+
+# Threshold for retrieval confidence — if < this, retrieval likely failed
+_RETRIEVAL_CONFIDENCE_THRESHOLD = 0.7
 
 
 class CriticAgent(BaseAgent):
     """
-    Critic Agent: Validates answer quality.
+    Critic Agent: Validates answer quality and classifies failure type.
 
-    - Checks for hallucinations
-    - Verifies evidence grounding
-    - Detects missing info
-    - Returns confidence score that feeds into confidence_final
-
-    2026-07-05 fix — unexplained 0-confidence rejections:
-      Recurring pattern across multiple sessions (Q6, Q10, Q9, Q15, Q18):
-      the judge LLM returns valid=False, confidence=0, issues=[] (empty)
-      for answers that are demonstrably well-grounded and correct --
-      confirmed on Q18 where retrieval score was 0.97 and the answer text
-      matched the source almost verbatim, yet the judge rejected it twice
-      with zero confidence and zero stated reason, exhausting retries and
-      returning a correct answer mislabeled at 29% confidence.
-
-      A 0-confidence rejection with NO issues listed is qualitatively
-      different from a rejection that names a specific problem (e.g. the
-      ARI/clustering case elsewhere in testing, which correctly flagged a
-      real gap) -- an unexplained blanket rejection looks like judge
-      noise, not a genuine catch.
-
-      Fix: compute a deterministic grounding score (do the answer's
-      concrete facts -- numbers, percentages, proper nouns -- actually
-      appear in the retrieved context?) as a backstop. If the judge's
-      rejection is unexplained (empty issues) AND grounding is strong,
-      override the rejection instead of trusting an unexplained verdict.
-      This does NOT touch explained rejections (non-empty issues) --
-      those may be catching something real and are left as-is.
-
-    2026-07-XX fix — override was firing on weak retrieval:
-      The override above was justified using Q18, where retrieval_score
-      was 0.97 -- i.e. it was only ever meant to apply when BOTH grounding
-      AND retrieval agree the answer is solid. Eval surfaced a case
-      (decline_01 rerun on the Lychee-FD paper, retrieval top_score=0.5493)
-      where grounding_score alone (0.83) triggered the override despite much
-      weaker retrieval, overturning a judge rejection that had correctly
-      caught a fabricated claim ("Lychee-FD achieves a 28.5% gain on
-      FullDuplexBench 1.5" -- not a real figure from the source, just a
-      topically-adjacent number). Now requires retrieval_score >= 0.7 too:
-      weak retrieval + an unexplained rejection is more likely a genuine
-      catch, not judge noise, so we no longer override in that regime.
-
-    2026-07-XX fix — overconfident_acceptance was unreachable:
-      This check (added 2026-07-10, see below) was nested inside the
-      unexplained_rejection block, which only ever runs when
-      grounding_score >= 0.8 -- but overconfident_acceptance requires
-      grounding_score < 0.2. Those two conditions can never both be true,
-      so the check could never fire. Moved out to run independently on
-      every judge acceptance, which is what its own docstring describes.
+    2026-07-XX: Enhanced to produce failure_type classification that
+    determines which component to retry:
+    
+    - "generation": AnswerAgent hallucinated or failed synthesis
+    - "retrieval": Retriever returned wrong/insufficient chunks
+    - "planning": Planner misrouted (web vs docs, wrong sources)
+    - "tool": ToolAgent execution failed
+    - "unknown": Can't confidently classify (return as-is, no retry)
+    
+    STRATEGY: Use deterministic rules FIRST, only LLM-classify if
+    deterministic signals are ambiguous. This reduces token usage and
+    avoids LLM noise in classification.
     """
 
     # ---- Grounding backstop -------------------------------------------
@@ -105,6 +75,55 @@ class CriticAgent(BaseAgent):
         matched = sum(1 for f in facts if f.lower() in context_lower)
         return matched / len(facts)
 
+    # ---- Deterministic failure classification -------------------------
+
+    def _classify_failure_deterministic(self, state: AgentState, grounding_score: float, 
+                                        retrieval_score: float) -> str:
+        """
+        Attempt to classify failure type using deterministic rules.
+        
+        Returns the classified failure_type ("generation", "retrieval", 
+        "planning", "tool", or None if ambiguous — meaning LLM will classify).
+        
+        IMPORTANT: This runs ONLY when is_valid=False. For acceptances,
+        we use the overconfident_acceptance check and don't need to classify.
+        """
+
+        # RULE 1: No documents retrieved at all → retrieval failure
+        if not state.retrieved_docs and "documents" in state.sources_needed:
+            return "retrieval"
+
+        # RULE 2: Retrieval score is very low despite docs being present
+        #         (could be reranking failure or semantic mismatch)
+        if retrieval_score < 0.5:  # very weak signal
+            return "retrieval"
+
+        # RULE 3: Tool was requested and tool execution error was recorded
+        if "tools" in state.sources_needed and state.tool_results.get("error"):
+            return "tool"
+
+        # RULE 4: Planner error was recorded (JSON parse failure, etc.)
+        if state.error and "planner" in state.error.lower():
+            return "planning"
+
+        # RULE 5: Strong grounding (facts ARE in context) but answer still
+        #         marked invalid → likely a judge error, not a generation error.
+        #         This is ambiguous without more info; LLM should classify.
+        if grounding_score >= _GROUNDING_THRESHOLD_STRONG:
+            return None  # ambiguous, let LLM decide
+
+        # RULE 6: Zero grounding (facts NOT in context) AND retrieval was
+        #         strong → generation failure (hallucination)
+        if grounding_score < _GROUNDING_THRESHOLD_WEAK and retrieval_score >= _RETRIEVAL_CONFIDENCE_THRESHOLD:
+            return "generation"
+
+        # RULE 7: Weak grounding AND weak retrieval → could be retrieval
+        if grounding_score < _GROUNDING_THRESHOLD_WEAK and retrieval_score < _RETRIEVAL_CONFIDENCE_THRESHOLD:
+            return "retrieval"
+
+        # RULE 8: Moderate grounding (neither strong nor weak) → ambiguous
+        return None
+
     # ---- JSON extraction (unchanged) -----------------------------------
 
     def _extract_json(self, text: str) -> dict:
@@ -129,25 +148,33 @@ class CriticAgent(BaseAgent):
                 pass
 
         print(f"[CRITIC] All JSON extraction strategies failed. Raw: {text[:300]!r}")
-        return {"valid": False, "confidence": 0, "issues": ["Could not parse critic response"], "needs_more_info": True}
+        return {
+            "valid": False,
+            "confidence": 0,
+            "failure_type": "unknown",
+            "issues": ["Could not parse critic response"],
+            "needs_more_info": True
+        }
 
     async def _execute(self, state: AgentState) -> AgentState:
-        """Validate the answer and set critic_confidence + confidence_final."""
+        """Validate the answer, set critic_confidence, and classify failure_type."""
 
         if not state.answer or state.answer.strip() == "Searching for relevant information...":
             state.error = "CriticAgent called before AnswerAgent produced an answer"
             state.is_valid = False
+            state.failure_type = "unknown"
             print("[CRITIC] Skipped — no answer to validate")
             return state
 
         if state.error or state.answer.strip() == _FAILED_ANSWER:
             state.is_valid = False
+            state.failure_type = "generation"  # AnswerAgent failed to generate
             state.validation_issues = ["Answer generation failed upstream; not evaluated"]
             state.critic_confidence = 0.0
             state.confidence_final = 0.0
             print(
                 f"[CRITIC] Skipped — answer generation failed upstream "
-                f"(state.error={state.error!r}), forcing confidence_final=0.0"
+                f"(state.error={state.error!r}), failure_type=generation, forcing confidence_final=0.0"
             )
             return state
 
@@ -167,6 +194,7 @@ class CriticAgent(BaseAgent):
         except Exception as e:
             state.error = f"Critic LLM call failed: {str(e)}"
             state.is_valid = False
+            state.failure_type = "unknown"
             print(f"[CRITIC] LLM call failed: {e}")
             return state
 
@@ -188,7 +216,7 @@ class CriticAgent(BaseAgent):
         full_context = "\n".join(doc["text"] for doc in state.retrieved_docs)
         grounding_score = self._compute_grounding_score(state.answer, full_context)
 
-        # retrieval_score computed here now (moved up from below) so both
+        # retrieval_score computed here (moved up from below) so both
         # override checks below can weigh it alongside grounding_score.
         top_doc_score = None
         if state.retrieved_docs:
@@ -211,36 +239,12 @@ class CriticAgent(BaseAgent):
                 f"no issues stated) — treating as valid"
             )
             state.is_valid = True
-            # Don't just set 1.0 -- reflect that this came from the
-            # deterministic backstop, not genuine LLM confidence, so it's
-            # visibly distinguishable in logs/metrics from a normal pass.
+            state.failure_type = ""  # Answer is now valid; no failure to classify
             state.critic_confidence = max(state.critic_confidence, 0.75)
             state.validation_issues = []
 
         # 2026-07-10 fix — unexplained high-confidence ACCEPTANCE despite
-        # near-zero grounding:
-        #   Mirror image of the override above. That fix protects against
-        #   the judge saying "invalid" when the answer is actually fine.
-        #   This protects the opposite and more dangerous direction: the
-        #   judge saying "valid, high confidence" while the deterministic
-        #   grounding check finds essentially no overlap between the
-        #   answer's claims and the retrieved context -- i.e. a likely
-        #   hallucination that the judge rubber-stamped.
-        #
-        #   Caught directly in eval: golden-set question about a benchmark
-        #   never mentioned in the source document (SQuAD) still produced
-        #   a confident-sounding accuracy figure. CriticAgent's own
-        #   grounding_score computed 0.00 (zero of the answer's checkable
-        #   facts appeared anywhere in retrieved context), yet the judge
-        #   returned valid=True, confidence=1.00, and confidence_final
-        #   still landed at 0.99 -- the highest-confidence answer in that
-        #   entire eval run, despite being the one most likely fabricated.
-        #
-        #   2026-07-XX: un-nested this from the unexplained_rejection block
-        #   above, where it was structurally unreachable (that block only
-        #   runs when grounding_score >= 0.8, but this needs grounding_score
-        #   < 0.2 -- the two can never both be true). Now runs independently
-        #   on every judge acceptance, explained or not.
+        # near-zero grounding (mirrored from unexplained_rejection above).
         overconfident_acceptance = (
             state.is_valid
             and state.critic_confidence >= 0.8
@@ -255,6 +259,7 @@ class CriticAgent(BaseAgent):
                 f"— judge likely rubber-stamped a hallucination"
             )
             state.is_valid = False
+            state.failure_type = "generation"  # Judge missed a hallucination
             state.critic_confidence = min(state.critic_confidence, 0.2)
             state.validation_issues = state.validation_issues + [
                 f"Deterministic grounding check found near-zero overlap "
@@ -263,11 +268,36 @@ class CriticAgent(BaseAgent):
                 f"likely hallucination"
             ]
 
+        # ── Failure type classification ───────────────────────────────────
+        # Only classify if is_valid=False (i.e., answer failed validation).
+        # If the answer passed, there's no failure to classify.
+        if not state.is_valid and not state.failure_type:
+            # Try deterministic classification first
+            deterministic_type = self._classify_failure_deterministic(
+                state, grounding_score, retrieval_score
+            )
+
+            if deterministic_type:
+                state.failure_type = deterministic_type
+                print(f"[CRITIC] Deterministic failure classification: {deterministic_type}")
+            else:
+                # Deterministic rules were ambiguous; fall back to asking the LLM
+                # (which already ran above, so we can extract from existing response)
+                llm_type = criticism.get("failure_type", "unknown")
+                if llm_type not in ("generation", "retrieval", "planning", "tool"):
+                    llm_type = "unknown"
+                state.failure_type = llm_type
+                print(f"[CRITIC] LLM-classified failure type: {llm_type}")
+
         state.confidence_final = round(
             0.7 * state.critic_confidence + 0.3 * retrieval_score, 4
         )
 
+        # Update change detection hashes (for early stop logic in graph routing)
+        state.last_answer_hash = _compute_hash(state.answer)
+
         print(f"[CRITIC] Valid: {state.is_valid}")
+        print(f"[CRITIC] Failure type: {state.failure_type or '(none)'}")
         print(f"[CRITIC] Critic confidence: {state.critic_confidence:.2f}")
         print(f"[CRITIC] Grounding score:   {grounding_score:.2f}")
         print(f"[CRITIC] Retrieval score:   {retrieval_score:.4f}")
