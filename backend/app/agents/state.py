@@ -62,6 +62,10 @@ class AgentState:
     2026-07-XX: Added failure_type classification, independent retry
     counters per component, and hash-based change detection to enable
     smart routing and early stopping.
+    
+    2026-08-06: Added low_confidence flag. Set by GraderAgent when 
+    retrieval quality is weak (top_score < ABSOLUTE_FLOOR). Downstream 
+    agents (AnswerAgent, CriticAgent) use this to adjust behavior.
     """
 
     def copy(self):
@@ -85,6 +89,12 @@ class AgentState:
     retrieved_docs: list[dict] = field(default_factory=list)
     web_results: list[dict] = field(default_factory=list)
     retrieval_rejected: bool = False   
+    
+    # ── Retrieval quality assessment ──────────────────────────────────────
+    # Set by GraderAgent. Signals whether top-score retrieval result was 
+    # weak (below ABSOLUTE_FLOOR threshold). Downstream agents use this 
+    # to decide whether to proceed cautiously or decline.
+    low_confidence: bool = False
     
     # ── Metadata short-circuit ───────────────────────────────────────────
     metadata_answer: dict = field(default_factory=dict)
