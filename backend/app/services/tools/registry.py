@@ -1,10 +1,18 @@
 from typing import Dict, Callable
 from app.services.tools.calculator import calculator_tool
 from app.services.tools.sql_executor import sql_executor_tool
+from app.services.tools.weather import weather_tool
+from app.services.tools.slack_tool import slack_tool
+from app.services.tools.email_tool import email_tool
 import app.services.tools.web_search as web_search_module  # import the MODULE, not the variable
 
 class ToolRegistry:
-    """Central registry of available tools"""
+    """
+    Central registry of available tools.
+    
+    2026-08-09 FIX: Imports weather, slack_post, and send_email tools
+    from separate tool files for better organization and consistency.
+    """
 
     def __init__(self):
         self.tools: Dict[str, Dict] = {
@@ -24,6 +32,33 @@ class ToolRegistry:
                     "collection": "Collection name",
                     "query_type": "find|count|aggregate",
                     "query": "Query parameters"
+                }
+            },
+            "weather": {
+                "name": "weather",
+                "description": "Get current weather for a location using OpenWeatherMap API",
+                "callable": weather_tool.get_weather,
+                "params": {
+                    "location": "City name (e.g., 'London', 'Mumbai')"
+                }
+            },
+            "slack_post": {
+                "name": "slack_post",
+                "description": "Post a message to a Slack channel",
+                "callable": slack_tool.post_message,
+                "params": {
+                    "channel": "Slack channel (e.g., '#new-channel')",
+                    "message": "Message to post"
+                }
+            },
+            "send_email": {
+                "name": "send_email",
+                "description": "Send an email via Gmail SMTP",
+                "callable": email_tool.send_email,
+                "params": {
+                    "subject": "Email subject",
+                    "body": "Email body",
+                    "to_email": "Recipient email address"
                 }
             },
         }
@@ -61,7 +96,12 @@ class ToolRegistry:
         return self.get_tools().get(tool_name)
 
     async def execute_tool(self, tool_name: str, **kwargs) -> Dict:
-        """Execute a tool with given parameters"""
+        """
+        Execute a tool with given parameters.
+        
+        2026-08-09 FIX: Now properly handles all 6 tools including
+        weather, slack_post, and send_email.
+        """
         tool = self.get_tool(tool_name)
         if not tool:
             return {"error": f"Tool '{tool_name}' not found"}
@@ -70,7 +110,10 @@ class ToolRegistry:
             result = await tool["callable"](**kwargs)
             return result
         except Exception as e:
-            return {"error": str(e)}
+            import traceback
+            print(f"[REGISTRY] Tool '{tool_name}' execution error: {e}")
+            traceback.print_exc()
+            return {"error": f"Tool execution failed: {str(e)}"}
 
 # Global registry instance
 tool_registry = ToolRegistry()
