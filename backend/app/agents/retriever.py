@@ -146,7 +146,7 @@ def _is_table_row_chunk(doc: dict) -> bool:
     return bool(_TABLE_ROW_PATTERN.match(doc.get("text", "")))
 
 
-# --- NEW: range/trend annotation -----------------------------------
+# --- Range/trend annotation for numeric value extraction ---------------
 _RANGE_RE = re.compile(
     r'(?:from|rising from|surging from|grew from|increas\w* from)\s+'
     r'([\d.]+)\s*(?:%|)\s*to\s+([\d.]+)\s*(?:%|)\s*(?:as|when|at|over)?\s*([^.,]*)',
@@ -155,6 +155,8 @@ _RANGE_RE = re.compile(
 
 
 def _annotate_ranges(text: str) -> str:
+    """Attach explicit annotations to range/trend statements so AnswerAgent
+    can read endpoint values directly without inferring them."""
     matches = _RANGE_RE.findall(text)
     if not matches:
         return text
@@ -167,7 +169,7 @@ def _annotate_ranges(text: str) -> str:
             f"often meaning zero), and rises to {end} at the point where {condition}.]"
         )
     return text + "\n" + "\n".join(annotations)
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------------
 
 
 def _rerank_key(doc: dict) -> float:
@@ -181,20 +183,33 @@ def _rerank_key(doc: dict) -> float:
 
 class RetrieverAgent(BaseAgent):
     """
-    Retriever Agent: Searches documents
+    Retriever Agent: Searches documents only.
 
+    Responsibilities:
     - Resolves whether the question names a specific uploaded document
-    - Performs hybrid search (vector + keyword), scoped to that document
-      if one was confidently resolved
-    - Retrieves top documents
-    - Attaches each chunk's source filename (one batched Mongo lookup)
-      so downstream AnswerAgent / the frontend source cards can display
-      the real document name instead of a generic "Source N" fallback
-    - Passes context to other agents
+    - Performs hybrid search (vector + keyword BM25), scoped to that
+      document if confidently resolved
+    - Retrieves top documents using configurable candidate-K expansion
+      for metric-style questions (wide search → narrow final context)
+    - Executes reranking to refine candidate ranking
+    - Applies entity-aware table-row protection for benchmark metrics
+    - Attaches source filenames for display in answer/sources card
+    - Annotates numeric ranges so AnswerAgent can read endpoint values
 
-    NOTE: Runs in PARALLEL with PlannerAgent, so it always searches.
-    The orchestrator decides whether to use the results based on
-    planner's sources_needed AFTER both complete.
+    CRITICAL 2026-08-09 FIX: Uses canonical question
+    `state.rewritten_question or state.question`
+    Same query as PlannerAgent, guarantees consistent routing.
+
+    NOTE: Runs in PARALLEL with PlannerAgent. It always searches; the
+    orchestrator decides whether to use results based on planner's
+    sources_needed AFTER both complete.
+
+    DOES NOT:
+    - Change sources_needed
+    - Decide web/tool routing
+    - Answer questions
+    - Grade answers
+    - Retry itself
     """
 
     def __init__(self, llm=None, db=None):
@@ -244,6 +259,8 @@ class RetrieverAgent(BaseAgent):
 
         try:
             start_time = time.time()
+            
+            # 2026-08-09 FIX: Use canonical question (same as PlannerAgent)
             question = state.rewritten_question or state.question
 
             document_id = await resolve_document_filter(question, state.user_id, self.db)
@@ -264,19 +281,17 @@ class RetrieverAgent(BaseAgent):
             # already, so this is a no-op slice.
             #
             # For metric-style questions: table-row chunks are guaranteed
-            # a spot regardless of rerank score (see _is_table_row_chunk
-            # note above -- confirmed via direct diagnostic that the
-            # reranker underrates this chunk format even when it's the
-            # one chunk with the actual answer). Remaining slots are
+            # a spot regardless of rerank score (confirmed via diagnostic
+            # that the reranker underrates table-row format even when it's
+            # the one chunk with the actual answer). Remaining slots are
             # filled by rerank score as before.
             #
             # 2026-08-06 FIX #3 follow-up: the guarantee is now scoped to
             # row chunks whose entity is actually named in the question
             # (unless it's an explicit comparison question, or no entity
-            # could be identified in the question at all -- see notes
-            # above _ROW_ENTITY_PATTERN). This is what actually stops the
-            # cross-entity mix-up; hybrid_search's dedup filter alone
-            # can't catch two DIFFERENT entities each appearing once.
+            # could be identified in the question at all). This stops the
+            # cross-entity mix-up (e.g., "What is Moshi's UTMOS?" must not
+            # return Lychee-FD's value).
             if is_metric_query and len(candidates) > FINAL_CONTEXT_SIZE:
                 is_comparison = _is_comparison_query(question)
                 all_row_chunks = [c for c in candidates if _is_table_row_chunk(c)]
@@ -314,21 +329,17 @@ class RetrieverAgent(BaseAgent):
             else:
                 results = candidates
 
-            # NEW: annotate range/trend statements so AnswerAgent can read
+            # Annotate range/trend statements so AnswerAgent can read
             # endpoint values directly instead of having to infer them
             for doc in results:
                 doc["text"] = _annotate_ranges(doc["text"])
-
-            print(f"[DEBUG-RANGE] annotate_ranges was called on {len(results)} chunks")  # <-- add this line
-            for doc in results:
-                if "[Note:" in doc["text"]:
-                    print(f"[DEBUG-RANGE] MATCH FOUND: ...{doc['text'][-200:]}")
 
             await self._attach_filenames(results)
 
             state.retrieved_docs = results
             state.search_time_ms = (time.time() - start_time) * 1000
 
+            print(f"[RETRIEVER] Canonical question: {question[:60]}...")
             print(f"[RETRIEVER] document_id filter: {document_id}")
             print(
                 f"[RETRIEVER] query type: {'metric-style' if is_metric_query else 'default'} "
@@ -336,19 +347,10 @@ class RetrieverAgent(BaseAgent):
             )
             print(f"[RETRIEVER] Found {len(results)} documents")
             for i, doc in enumerate(results, 1):
-                # rerank_score is the BGE cross-encoder score and is what
-                # actually determines final ranking (when reranking ran).
-                # combined_score is the RRF fusion score from BM25+vector -
-                # it's rank-based and tightly clustered by design (RRF_K=60),
-                # so it will always look "flat" at 2 decimal places even
-                # when fusion is working correctly. Don't use it to judge
-                # whether retrieval quality is good or bad.
                 if 'rerank_score' in doc:
                     score_label = "rerank"
                     score_value = doc['rerank_score']
                 else:
-                    # Reranker was unavailable/skipped - fall back to RRF score,
-                    # but flag it so it's obvious which scoring path was used.
                     score_label = "rrf (no rerank)"
                     score_value = doc.get('combined_score', 0.0)
 
