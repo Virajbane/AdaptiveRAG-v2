@@ -118,3 +118,55 @@ class LLMProvider:
         if isinstance(response, dict):
             return response.get('response', '')
         return getattr(response, 'response', '')
+
+    async def acomplete(
+        self,
+        system: str = "",
+        prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 2000
+    ) -> object:
+        """
+        Compatibility wrapper matching the planner/agents' interface.
+
+        2026-08-09 FIX: The planner and other agents call with 
+        (system, prompt, temperature, max_tokens) signature, but 
+        our generate() only takes (prompt, max_tokens). This adapter 
+        bridges the gap by combining system+prompt and delegating to 
+        generate(), then wrapping the result in an object with a .text 
+        attribute that callers expect.
+
+        Args:
+            system: System/instruction prompt (context/rules for the LLM)
+            prompt: User/question prompt (the actual query)
+            temperature: Sampling temperature (currently ignored - Ollama/Groq 
+                        may not support in async API, but accepted for compatibility)
+            max_tokens: Maximum output tokens
+
+        Returns:
+            Object with .text attribute containing the response string
+
+        Example:
+            response = await llm.acomplete(
+                system="Classify the question...",
+                prompt="What is the weather?",
+                temperature=0,
+                max_tokens=40,
+            )
+            result = response.text  # Get the response text
+        """
+        # Combine system prompt (instructions) with user prompt (question)
+        # System gives the LLM context/rules, prompt is what we actually ask
+        full_prompt = f"{system}\n\n{prompt}".strip() if system else prompt
+
+        # Call the main generate method (it handles Groq vs Ollama internally)
+        response_text = await self.generate(full_prompt, max_tokens)
+
+        # Wrap the text in an object with .text attribute
+        # This matches what callers (planner, agents) expect
+        class TextResponse:
+            """Simple response wrapper with .text attribute"""
+            def __init__(self, text: str):
+                self.text = text
+
+        return TextResponse(response_text)
