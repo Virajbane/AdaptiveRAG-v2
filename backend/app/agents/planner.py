@@ -1,104 +1,207 @@
+import json
 import re
 
 from app.agents.base import BaseAgent
+from app.agents.prompts import PLANNER_PROMPT
 from app.agents.state import AgentState
 
 # --------------------------------------------------------------------------
-# 2026-07-XX routing rewrite
+# ROUTING HISTORY (read before modifying)
 #
-# History: the Planner used to ask an LLM to decide sources_needed for
-# every question, then patched that decision with a growing stack of
-# deterministic regex overrides (_looks_personal_only, _needs_both,
-# _references_uploaded_doc) because the LLM kept misrouting despite
-# explicit prompt rules -- most notably the Bug 1 failure mode, where a
-# question naming the document's subject by name (no personal pronoun,
-# no "this/the document" phrasing) fell through every existing override
-# and the LLM silently chose sources=["web"], which then returned
-# content about an unrelated same-named entity.
+# v1 (LLM free-text routing): caused Bug 1 -- a question naming a
+# document's subject by name (no "my"/"this doc" wording) got silently
+# misrouted to "web", returning content about an unrelated same-named
+# entity.
 #
-# Root cause across all of those patches was the same: routing decided
-# by inference over free text is inherently guessable-wrong, and every
-# new failure mode required a new regex to catch it after the fact.
+# v2 (explicit @tag routing): fixed Bug 1 by removing inference
+# entirely. Later reverted per explicit request -- inference was
+# wanted back.
 #
-# Fix: remove inference from routing entirely. Users (or UI buttons)
-# prefix their message with explicit tags -- "@web", "@sql",
-# "@documents" -- naming exactly which source(s) to use. Multiple
-# leading tags run in parallel. No tags -> default to the documents-only
-# RAG pipeline, same safe default the old code fell back to on any
-# parse/LLM failure.
+# v3 (current): LLM classification restored, but constrained to a
+# CLOSED output space (SOURCE_REGISTRY keys only, enforced by
+# _parse_classifier_output dropping anything outside that set). This
+# is stricter than v1's free-text router. Residual risk from Bug 1
+# still exists in principle -- mitigated by:
+#   (a) closed output space (can't invent a 7th source),
+#   (b) documents-bias instruction in the prompt,
+#   (c) safe ["documents"] fallback on any parse failure,
+#   (d) the entity-binding check on web results (Bug 6 fix) living
+#       downstream in the web tool, independent of how "web" was
+#       selected.
+#   (e) 2026-08-09 FIX: document-intent protection with high-confidence
+#       detection for paper/figure/table/section/abstract queries.
 #
-# This does NOT replace the entity-binding check required by Bug 6:
-# even with an explicit "@web" tag, the web tool's results still need
-# to be verified against the document's identity record before being
-# trusted. That check lives in the web tool integration, not here --
-# this file only decides *which* sources run, not whether their output
-# is safe to use.
+# v4 (2026-08-09): Added document-intent protection patterns to catch
+# research paper evaluation questions without LLM inference. Added
+# support for multi-source routing (e.g. ["documents", "web"]). Now
+# uses rewritten_question as the authoritative input to the classifier.
 #
-# The metadata short-circuit (_METADATA_Q) is unrelated to routing
-# inference -- it's a retrieval-bypass optimization for title/author
-# questions, which have near-zero lexical/semantic overlap with stored
-# metadata text no matter how retrieval is tuned. It's independent of
-# how "documents" got selected as a source, so it's kept as-is and
-# still runs first, before tag parsing.
+# SOURCE_REGISTRY is the intended single source of truth for the
+# classifier prompt AND for what tool_agent.py / graph.py treat as
+# valid. The import-time assertion below will fail fast if the prompt
+# step is forgotten.
+#
+# Adding a future source = one dict entry here + a rule/example in
+# PLANNER_PROMPT (prompts.py) + one handler in tool_agent.py + (if it
+# needs pre-answer execution) one line in graph.py's dispatch check.
 # --------------------------------------------------------------------------
 
 _METADATA_Q = re.compile(r"\b(title|author|affiliat)", re.IGNORECASE)
 
-_KNOWN_TAGS = {"web", "sql", "documents"}
-_VALID_SOURCES = {"documents", "web", "tools", "sql"}
-_TAG_PATTERN = re.compile(r"^@(\w+)\b")
+# Document-intent protection: high-confidence patterns that signal the
+# question is asking specifically about what a document/paper says,
+# not general knowledge. These bypass LLM inference and route directly
+# to documents.
+_DOCUMENT_INTENT = re.compile(
+    r"\b(according to the (?:paper|document|pdf|abstract)|"
+    r"in the (?:paper|document|pdf|abstract|section|appendix)|"
+    r"(?:what (?:is|does)|list) (?:reported|mentioned|described|stated) in|"
+    r"(?:figure|table|section|appendix) (?:\d+|[A-Z])|"
+    r"according to (?:figure|table|figure|section))\b",
+    re.IGNORECASE
+)
+
+# Canonical source name -> config.
+# `implemented=False` means no real executor exists yet in tool_agent.py;
+# the Planner short-circuits with a placeholder instead of claiming a
+# source it can't back up.
+SOURCE_REGISTRY: dict[str, dict] = {
+    "documents": {
+        "description": "user's uploaded files / vector DB / internal knowledge base",
+        "implemented": True,
+    },
+    "web": {
+        "description": "current events, news, latest benchmarks, live information",
+        "implemented": True,
+    },
+    "calculator": {
+        "description": "math, unit conversions, percentage calculations",
+        "implemented": True,
+    },
+    "database": {
+        "description": (
+            "counts/stats/records from the app's own database "
+            "(SQL/Postgres/MySQL/MongoDB/Redis/Supabase)"
+        ),
+        "implemented": False,
+    },
+    "tool": {
+        "description": (
+            "external APIs not covered above -- weather, email, calendar, "
+            "GitHub, Slack, generic REST APIs"
+        ),
+        "implemented": True,
+    },
+    "direct_llm": {
+        "description": "general knowledge, definitions, explanations, no external data",
+        "implemented": True,
+    },
+}
+
+_VALID_SOURCES = set(SOURCE_REGISTRY.keys())
+_PLACEHOLDER_SOURCES = {name for name, cfg in SOURCE_REGISTRY.items() if not cfg["implemented"]}
+
+# --------------------------------------------------------------------------
+# 2026-08-09 FIX (routing bug): guardrail against SOURCE_REGISTRY /
+# PLANNER_PROMPT drift. Ensures every source registered is mentioned
+# in the prompt, so the classifier can actually select it.
+# --------------------------------------------------------------------------
+_missing_from_prompt = [name for name in _VALID_SOURCES if name not in PLANNER_PROMPT]
+if _missing_from_prompt:
+    raise RuntimeError(
+        f"PLANNER_PROMPT (prompts.py) does not mention source(s) "
+        f"{_missing_from_prompt!r} defined in SOURCE_REGISTRY. The "
+        f"classifier can never select a source name it is never shown -- "
+        f"add a rule/example for it in PLANNER_PROMPT before deploying, or "
+        f"the router will silently default those questions to ['documents']."
+    )
 
 
-def _parse_leading_tags(question: str) -> tuple[list[str], str]:
+def _parse_classifier_output(raw: str) -> list[str]:
     """
-    Scans leading whitespace-separated words for @tag markers
-    (e.g. "@web @sql what is ..."). Stops at the first word that isn't
-    a recognized tag -- that's where the real question begins.
+    Parses the classifier's output. Handles both:
+    1. JSON array format: ["web", "calculator"]
+    2. JSON object format: {"sources": ["web"], "intent": "...", ...}
 
-    Only LEADING tags count. A "@web" appearing later in the question
-    body (e.g. "compare @web mentions on my site") is not treated as a
-    tag -- it's just part of the question text, since the scan stops
-    the moment a non-tag word is hit.
+    Strips code fences defensively. Any name outside SOURCE_REGISTRY is
+    dropped -- the output space is closed by design, so an unrecognized
+    name is a parse anomaly, not a new legitimate source.
 
-    Unknown tags (e.g. "@foobar") are not collected and are left as
-    part of the question text. This naturally falls through to the
-    no-tag/default-RAG case rather than silently being swallowed or
-    raising an error.
+    2026-08-09 FIX: Updated to handle JSON objects with "sources" field,
+    which is what the PLANNER_PROMPT examples show. Previously only
+    accepted JSON arrays, causing all object-formatted responses to
+    be rejected as "nothing usable" and fall back to documents search.
 
-    Returns (tags_found, remaining_question).
+    2026-08-09 FIX (priming-brace robustness): PLANNER_PROMPT ends with
+    a dangling, unclosed "{" to bias the model toward JSON. That trick
+    only reliably works when the "{" is sent as a true assistant-turn
+    prefill; here it's the tail of a `system` message, with the actual
+    question passed separately as `prompt=question`. We now normalize
+    for both cases before parsing.
     """
-    words = question.strip().split()
-    tags: list[str] = []
-    i = 0
-    while i < len(words):
-        match = _TAG_PATTERN.match(words[i])
-        if match and match.group(1).lower() in _KNOWN_TAGS:
-            tag = match.group(1).lower()
-            if tag not in tags:
-                tags.append(tag)
-            i += 1
+    cleaned = raw.strip()
+    # Strip markdown code fences
+    cleaned = re.sub(r"^```(json)?|```$", "", cleaned, flags=re.MULTILINE).strip()
+
+    if not cleaned.startswith("{") and not cleaned.startswith("["):
+        if cleaned.endswith("}"):
+            # Most likely case: the model continued from the prompt's
+            # trailing "{" without re-emitting it. Add it back.
+            cleaned = "{" + cleaned
         else:
-            break
-    remaining = " ".join(words[i:]).strip()
-    return tags, remaining
+            # Fallback: salvage a JSON object embedded anywhere in the text.
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                cleaned = match.group(0)
+
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError):
+        print(f"[PLANNER] Failed to parse JSON: {raw!r}")
+        return []
+
+    # ---- Handle JSON object with "sources" field ----
+    if isinstance(parsed, dict):
+        if "sources" in parsed and isinstance(parsed["sources"], list):
+            # Extract sources array from object
+            sources = parsed["sources"]
+            result = [s for s in sources if isinstance(s, str) and s in _VALID_SOURCES]
+            if result:
+                print(f"[PLANNER] Extracted from object: {result!r}")
+            return result
+        # Object exists but has no "sources" field
+        print(f"[PLANNER] Parsed object has no 'sources' field: {parsed}")
+        return []
+
+    # ---- Handle JSON array directly ----
+    if isinstance(parsed, list):
+        return [s for s in parsed if isinstance(s, str) and s in _VALID_SOURCES]
+
+    # ---- Neither object nor array ----
+    print(f"[PLANNER] Parsed output is neither object nor array: {type(parsed)} = {parsed!r}")
+    return []
 
 
 class PlannerAgent(BaseAgent):
     """
-    Planner Agent: Decides what sources to use.
+    Planner Agent: decides WHERE information should come from.
 
-    Routing is now explicit rather than inferred:
-    - Leading "@tag" markers in the user's message name which source(s)
-      to use (multiple tags run in parallel).
-    - No tags -> defaults to the documents-only RAG pipeline.
-    - "@sql" is still under construction -- it short-circuits with a
-      placeholder response rather than touching a real SQL tool.
+    Does NOT retrieve, execute tools, answer, validate, or retry --
+    those belong to other agents/nodes.
 
-    Still takes an optional `db` handle for the metadata short-circuit
-    (_get_document_metadata looks up stored title/author metadata by
-    user_id). Pass db=None if metadata lookup isn't needed in a given
-    context -- the short-circuit simply falls through to tag-based
-    routing in that case.
+    Routing precedence:
+      1. Metadata short-circuit (title/author questions).
+      2. Document-intent protection (high-confidence paper/figure/table
+         patterns) → routes to documents without LLM inference.
+      3. LLM classification, constrained to SOURCE_REGISTRY's names.
+         Falls back to ["documents"] on any parse failure or empty
+         result. Placeholder sources short-circuit with a placeholder
+         answer instead of being sent downstream.
+
+    2026-08-09 FIX: Now uses rewritten_question as the authoritative
+    question for classification. Added document-intent protection for
+    research paper evaluation questions. Supports multi-source outputs
+    (e.g. ["documents", "web"]).
     """
 
     def __init__(self, llm, db=None):
@@ -106,12 +209,6 @@ class PlannerAgent(BaseAgent):
         self.db = db
 
     async def _get_document_metadata(self, state: AgentState) -> dict | None:
-        """
-        Fetch stored metadata for the user's active document. Returns
-        None if no db handle, no documents, or no metadata was
-        extracted at ingestion time (e.g. extraction failed silently —
-        see MetadataExtractor.extract's None-return path).
-        """
         if self.db is None:
             return None
         doc = await self.db.documents.find_one(
@@ -122,15 +219,43 @@ class PlannerAgent(BaseAgent):
             return doc["metadata"]
         return None
 
-    async def _execute(self, state: AgentState) -> AgentState:
-        """Plan the search strategy"""
+    async def _classify_sources(self, question: str) -> list[str]:
+        """
+        Single, compact, constrained classification call. One routing
+        decision, then stop -- no chain-of-thought, per latency requirement.
 
+        2026-08-09 FIX: Now uses llm.acomplete() with system+prompt signature.
+        """
+        try:
+            # Call the LLM with system prompt + user question
+            # PLANNER_PROMPT comes from prompts.py and is the source of truth
+            response = await self.llm.acomplete(
+                system=PLANNER_PROMPT,
+                prompt=question,
+                temperature=0,
+                max_tokens=40,
+            )
+            # Extract text from response object
+            raw = response.text if hasattr(response, "text") else str(response)
+        except AttributeError as exc:
+            # Catch if acomplete() method is missing
+            print(f"[PLANNER] Classifier call failed: {exc!r} -- defaulting to documents")
+            return []
+        except Exception as exc:
+            # Catch other LLM errors (network, timeout, invalid key, etc.)
+            print(f"[PLANNER] LLM error: {exc!r} -- defaulting to documents")
+            return []
+
+        sources = _parse_classifier_output(raw)
+        print(f"[PLANNER] Classifier sources: {sources!r} (raw={raw!r})")
+        return sources
+
+    async def _execute(self, state: AgentState) -> AgentState:
+        # Use rewritten_question if available, else fall back to original question
+        question_to_classify = state.rewritten_question or state.question
         original_question = state.question
 
-        # ---- Metadata short-circuit: unchanged, still runs first ----
-        # Independent of tag routing -- this is a retrieval-bypass
-        # optimization, not a routing decision. Runs against the
-        # original question, same as before.
+        # ---- Metadata short-circuit ----
         if _METADATA_Q.search(original_question):
             doc_metadata = await self._get_document_metadata(state)
             if doc_metadata:
@@ -142,34 +267,38 @@ class PlannerAgent(BaseAgent):
             print("[PLANNER] Metadata question detected but no stored "
                   "metadata found — falling through to normal routing")
 
-        # ---- Explicit tag routing ----
-        tags, remaining_question = _parse_leading_tags(original_question)
-
-        if tags:
-            state.question = remaining_question or original_question
-            print(f"[PLANNER] Explicit tags detected: {tags!r}, "
-                  f"question: {state.question!r}")
-
-            if "sql" in tags:
-                # SQL tool integration is still under construction.
-                # Short-circuit immediately, same shape as the metadata
-                # check above -- do not touch retriever/grader/answer/
-                # critic at all.
-                print("[PLANNER] @sql tag detected -- SQL tool not yet "
-                      "implemented, returning placeholder")
-                state.sources_needed = ["sql"]
-                state.metadata_answer = {
-                    "placeholder": "SQL integration is under development."
-                }
-                return state
-
-            state.sources_needed = [t for t in tags if t in _VALID_SOURCES]
-            state.confidence = 1.0  # explicit user intent, not a guess
-            print(f"[PLANNER] Sources (explicit): {state.sources_needed}")
+        # ---- Document-intent protection (high-confidence bypass) ----
+        # Catches research paper evaluation questions without LLM inference.
+        # Examples: "What is Lychee-FD's UTMOS score in Figure 4?"
+        #           "According to the paper, what does Table 3 show?"
+        if _DOCUMENT_INTENT.search(question_to_classify):
+            print(f"[PLANNER] Document-intent pattern detected in: "
+                  f"{question_to_classify[:60]}... → routing to documents")
+            state.sources_needed = ["documents"]
+            state.confidence = 0.95
             return state
 
-        # ---- No tags: default to documents-only RAG pipeline ----
-        print("[PLANNER] No tags detected, defaulting to sources=['documents']")
-        state.sources_needed = ["documents"]
-        state.confidence = 0.5
+        # ---- LLM classification ----
+        sources = await self._classify_sources(question_to_classify)
+
+        if not sources:
+            print("[PLANNER] Classifier returned nothing usable — "
+                  "defaulting to sources=['documents']")
+            state.sources_needed = ["documents"]
+            state.confidence = 0.5
+            return state
+
+        placeholder_hits = [s for s in sources if s in _PLACEHOLDER_SOURCES]
+        if placeholder_hits:
+            print(f"[PLANNER] Classifier picked placeholder source(s) "
+                  f"{placeholder_hits!r} -- returning placeholder")
+            state.sources_needed = placeholder_hits
+            state.metadata_answer = {
+                "placeholder": f"{placeholder_hits[0]} integration is under development."
+            }
+            return state
+
+        state.sources_needed = sources
+        state.confidence = 0.6
+        print(f"[PLANNER] Sources (classified): {state.sources_needed}")
         return state
