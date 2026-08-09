@@ -105,8 +105,23 @@ async def startup():
     await redis_client.connect()
     print("✅ Redis connected")
 
-    init_web_search(settings.TAVILY_API_KEY)
-    print("✅ Tools initialized")
+    if settings.TAVILY_API_KEY:
+        init_web_search(settings.TAVILY_API_KEY)
+        print("✅ Web search (Tavily) initialized")
+    else:
+        print("⚠️  TAVILY_API_KEY not set (web search will fail)")
+    
+    # Other integrations (optional — will gracefully skip if not configured)
+    if settings.OPENWEATHER_API_KEY:
+        print("✅ OpenWeather configured")
+    if settings.SLACK_BOT_TOKEN:
+        print("✅ Slack configured")
+    if settings.SMTP_USER:
+        print("✅ Email (SMTP) configured")
+    if settings.GITHUB_TOKEN:
+        print("✅ GitHub API configured")
+    
+    print("✅ All available tools initialized")
 
     db = await get_db()
     print(f"✅ Got database: {db}")

@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     TAVILY_API_KEY: str = ""
+    OPENWEATHER_API_KEY: Optional[str] = None      # ← NEW
+    GITHUB_TOKEN: Optional[str] = None              # ← NEW
+    SLACK_BOT_TOKEN: Optional[str] = None           # ← NEW
+    SMTP_HOST: str = "smtp.gmail.com"               # ← NEW
+    SMTP_USER: Optional[str] = None                 # ← NEW
+    SMTP_PASSWORD: Optional[str] = None             # ← NEW
+    SMTP_PORT: int = 587                            # ← NEW
     VOYAGE_API_KEY: Optional[str] = None
 
     # ==================== SECURITY ====================
