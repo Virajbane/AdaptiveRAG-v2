@@ -10,19 +10,13 @@ import re
 # num_ctx we treat as "spoken for" by the answer itself, so we never
 # compute an "available for context" number by pretending the LLM will
 # generate 0 tokens back. Also passed explicitly to call_llm() below so
-# what we budget against matches what's actually requested -- there
-# was previously a DEFAULT_NUM_CTX=2048 / default generate() max_tokens
-# =2000 mismatch (see provider.py) that left as little as ~48 tokens of
-# real headroom for the entire prompt, regardless of what this file did
-# with chunk sizes. This value is generous for this prompt's own rules
-# (mostly one-sentence or short-list answers; see ANSWER_PROMPT), while
-# leaving real room for retrieved context.
+# what we budget against matches what's actually requested.
 ANSWER_RESERVED_OUTPUT_TOKENS = 500
 
 # Slack for tokenizer-estimate error (mainly relevant on the Groq path,
-# where counting is a chars-per-token estimate, not an exact count --
-# see app/utils/tokenization.py). Kept out of the "usable" budget so a
-# slight undercount doesn't tip us over num_ctx in practice.
+# where counting is a chars-per-token estimate, not an exact count).
+# Kept out of the "usable" budget so a slight undercount doesn't tip
+# us over num_ctx in practice.
 BUDGET_SAFETY_MARGIN_TOKENS = 50
 
 # Excludes digits embedded inside hyphenated/alphanumeric identifiers
@@ -48,10 +42,7 @@ _KV_RE = re.compile(r'([^,]+?=[^,]+)')
 # line must NOT be run through the prose sentence-splitter, because
 # DoclingChunker's own column names contain periods that aren't sentence
 # boundaries (e.g. "FullDuplexBench 1.5.Lat."). Splitting a table row on
-# '.' the same way prose is split shreds it into meaningless fragments
-# *before* the comma/field split ever runs -- confirmed by direct testing
-# against real Table 2 data; an earlier version of this fix did exactly
-# that and silently broke both the correct and incorrect test cases.
+# '.' the same way prose is split shreds it into meaningless fragments.
 _ROW_LINE_RE = re.compile(r'^\s*Row \[(.*?)\]:\s*(.*)$')
 
 _QUESTION_STOPWORDS = {
@@ -60,12 +51,49 @@ _QUESTION_STOPWORDS = {
 }
 
 
+# 2026-08-09 FIX: Each tool result type gets a formatter so AnswerAgent
+# can include calculator/weather/slack/email results, not just web.
+# Returns None for missing/errored results so they're excluded.
+def _format_tool_result(kind: str, result: dict | None) -> str | None:
+    if not result or result.get("error"):
+        return None
+
+    if kind == "calculator":
+        value = result.get("result")
+        if value is None:
+            return None
+        expression = result.get("expression")
+        prefix = f"{expression} = " if expression else ""
+        return f"[Calculator Result] {prefix}{value}"
+
+    if kind == "weather":
+        temp = result.get("temperature")
+        desc = result.get("description")
+        if temp is None and not desc:
+            return None
+        location = result.get("location") or "the requested location"
+        details = ", ".join(
+            p for p in (f"{temp}°C" if temp is not None else None, desc) if p
+        )
+        return f"[Weather Result] {location}: {details}"
+
+    if kind == "slack":
+        channel = result.get("channel") or "the requested channel"
+        return f"[Slack Result] Message was posted to {channel}."
+
+    if kind == "email":
+        to_email = result.get("to_email") or "the requested recipient"
+        return f"[Email Result] Email was sent to {to_email}."
+
+    return None
+
+
 # =============================================================================
 # 2026-08-06 FIX #2: IMPROVED ENTITY EXTRACTION & GROUNDING
 # =============================================================================
 # Previously: extracted entities from question (capitalization heuristic)
 #             This missed aliases like "Lychee-FD (Ours)" and failed on pronouns
-# 
+#
 # Now: extract entities from ACTUAL ROW LABELS in the context
 #      Fallback to question-based extraction only if no table rows present
 # =============================================================================
@@ -73,12 +101,12 @@ _QUESTION_STOPWORDS = {
 def _extract_entities_from_rows(context: str) -> set:
     """
     Extract entity labels directly from table row lines in the context.
-    
+
     This is more reliable than extracting from the question because:
     - Captures entity aliases exactly as they appear in data ("Lychee-FD (Ours)")
     - Handles questions with pronouns ("What does it achieve?" has no entities)
     - Won't be fooled by entity names in other parts of the prose
-    
+
     Returns a set of entity labels like {"Lychee-FD (Ours)", "Moshi", "Baseline"}
     """
     entities = set()
@@ -95,7 +123,7 @@ def _extract_entities_from_question(question: str) -> set:
     """
     Fallback: extract capitalized multi-char tokens from the question.
     Used only if no table rows are present in the context.
-    
+
     This is the original approach, kept for non-table questions.
     """
     return {
@@ -106,19 +134,19 @@ def _extract_entities_from_question(question: str) -> set:
 
 def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     """
-    Verify that numbers in the answer are grounded in the context and 
+    Verify that numbers in the answer are grounded in the context and
     attributed to the correct entity/field.
-    
+
     2026-08-06 fix (entity-attribution cascade):
     - Extract entities from ACTUAL ROW LABELS in context, not from question
-    - For table rows, enforce that number + entity + field all cooccur in 
+    - For table rows, enforce that number + entity + field all cooccur in
       the same row's own field-level span
     - For prose, use the weaker sentence-level span check (no per-field split)
-    
-    This catches the "4.50 for Lychee-FD but you answered it for Moshi" bug 
-    by requiring an answer's cited number to appear in a span that ALSO 
+
+    This catches the "4.50 for Lychee-FD but you answered it for Moshi" bug
+    by requiring an answer's cited number to appear in a span that ALSO
     contains the queried entity's row label.
-    
+
     Returns:
         True if all numbers in the answer are properly grounded and attributed
         False if any number is missing from context or attributed to wrong entity
@@ -130,7 +158,7 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     # Extract entities from ROWS first (more precise than question parsing)
     # This is the key change: use actual row labels instead of capitalization heuristic
     entities_from_rows = _extract_entities_from_rows(context)
-    
+
     if not entities_from_rows:
         # No table rows in context -- fall back to question-based extraction
         # for conceptual/non-comparative questions (unchanged behavior)
@@ -143,7 +171,7 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
         # Use entities extracted from actual row labels
         entities = entities_from_rows
 
-    # Build fine-grained spans: table rows split on commas (per field), 
+    # Build fine-grained spans: table rows split on commas (per field),
     # prose split on sentence boundaries
     fine_spans = []
     for line in context.split("\n"):
@@ -154,13 +182,11 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
             kv_fragments = _KV_RE.findall(fields_text)
             if kv_fragments:
                 # Each field gets its own span with the row label attached
-                # This ensures "Stop.=570" and "Lat.=826" are separate spans
                 fine_spans.extend(
                     f"Row [{row_entity}]: {frag}" for frag in kv_fragments
                 )
                 continue
-            # Row-shaped line but no parseable fields -- treat as plain text
-        
+
         # Non-table line: split on sentence boundaries (skip decimals)
         for sentence in re.split(r"(?<!\d)\.(?!\d)", line):
             if sentence.strip():
@@ -170,20 +196,19 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     for num in numbers_in_answer:
         # For each number, find ALL spans containing it
         spans_with_num = [s for s in fine_spans if num in s]
-        
+
         if not spans_with_num:
             # Number doesn't appear anywhere in context
             return False
-        
+
         # Check if any of those spans also contain one of the queried entities
         num_is_attributed = any(
             any(e.lower() in s.lower() for e in entities)
             for s in spans_with_num
         )
-        
+
         if not num_is_attributed:
             # Number exists in context but not attached to any queried entity
-            # (e.g., "4.50" exists under "Moshi" but question asked about "Lychee-FD")
             return False
 
     return True
@@ -192,49 +217,13 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
 class AnswerAgent(BaseAgent):
     async def _execute(self, state: AgentState) -> AgentState:
 
-        # 2026-07-03 fix: ToolAgent stores web/tool output in
-        # state.tool_results, but nothing here ever read it -- the LLM
-        # was only ever shown state.retrieved_docs, so a successful web
-        # search (e.g. "who won the most recent F1 race?") was silently
-        # discarded and the model answered off irrelevant/empty document
-        # chunks instead ([ANSWER] logs always said "Using N top
-        # documents", never anything about web results, even on
-        # web-routed questions where a search had just completed).
-        # Build a separate tool-results block and include it whenever
-        # present, regardless of whether documents were also retrieved --
-        # personal+comparison questions (routing_005-style) need both.
-        web_result = state.tool_results.get("web_search") if state.tool_results else None
-        tool_context = ""
-        web_result_count = 0
-        if web_result and "error" not in web_result:
-            entries = web_result.get("results", [])
-            web_result_count = len(entries)
-            if entries:
-                formatted = []
-                for i, entry in enumerate(entries, 1):
-                    title = entry.get("title", "")
-                    snippet = entry.get("snippet") or entry.get("content") or ""
-                    url = entry.get("url", "")
-                    formatted.append(f"[Web {i}] {title}\n{snippet}\n{url}".strip())
-                tool_context = "\n\n".join(formatted)
-
-        # 2026-07-03 fix: retrieval runs unconditionally upstream of the
-        # planner's routing decision, so state.retrieved_docs is always
-        # populated -- even for web-only questions where the Planner
-        # explicitly decided sources_needed=['web'] and never asked for
-        # documents. Previously AnswerAgent ignored that decision and
-        # always included top_docs regardless, so a web-only question
-        # like "who won the most recent F1 race?" got 5 near-zero-
-        # relevance document chunks (e.g. rerank scores ~0.0001, about
-        # accessibility/coroutines/mobile AI) mixed into the same
-        # context as the real web results. Handing a local LLM unrelated
-        # noise next to legitimate facts is a plausible contributor to
-        # it blending/contradicting itself (observed: HallucinationMetric
-        # flagging the web-grounded answer as disagreeing with context).
-        # Respect the router's decision the same way tool_context already
-        # does: only include doc context when 'documents' was requested.
-        docs_wanted = "documents" in (state.sources_needed or [])
-        # Was: top_docs = state.retrieved_docs[:3] if docs_wanted else []
+        # 2026-08-09 FIX: Respect routing decision. Only include evidence
+        # from sources that were actually routed to by Planner.
+        sources_needed = state.sources_needed or []
+        
+        # ── Document evidence ────────────────────────────────────────
+        # Include top_docs only if "documents" was routed to
+        docs_wanted = "documents" in sources_needed
         if docs_wanted:
             protected = [d for d in state.retrieved_docs if d.get("protected")]
             other = sorted(
@@ -246,6 +235,60 @@ class AnswerAgent(BaseAgent):
         else:
             top_docs = []
 
+        # ── Tool results ─────────────────────────────────────────────
+        # Include tool results only if corresponding source was routed to.
+        # "tool" source includes weather, email, slack; "calculator" is its own source.
+        tool_context_parts = []
+        web_result_count = 0
+        non_web_tool_used = False
+
+        # Web search: only if "web" was routed
+        web_result = None
+        if "web" in sources_needed:
+            web_result = state.tool_results.get("web_search") if state.tool_results else None
+            if web_result and "error" not in web_result:
+                entries = web_result.get("results", [])
+                web_result_count = len(entries)
+                if entries:
+                    formatted = []
+                    for i, entry in enumerate(entries, 1):
+                        title = entry.get("title", "")
+                        snippet = entry.get("snippet") or entry.get("content") or ""
+                        url = entry.get("url", "")
+                        formatted.append(f"[Web {i}] {title}\n{snippet}\n{url}".strip())
+                    tool_context_parts.append("\n\n".join(formatted))
+
+        # Calculator: only if "calculator" was routed
+        if "calculator" in sources_needed:
+            result = state.tool_results.get("calculator") if state.tool_results else None
+            formatted = _format_tool_result("calculator", result)
+            if formatted:
+                tool_context_parts.append(formatted)
+                non_web_tool_used = True
+
+        # Tool-executed results (weather, email, slack): only if "tool" was routed
+        if "tool" in sources_needed:
+            for kind in ("weather", "slack", "email"):
+                result = state.tool_results.get(kind) if state.tool_results else None
+                formatted = _format_tool_result(kind, result)
+                if formatted:
+                    tool_context_parts.append(formatted)
+                    non_web_tool_used = True
+
+        # 2026-08-09 FIX: Metadata as evidence. Metadata is treated like
+        # retrieved evidence, not as a shortcut bypass. If Planner identified
+        # metadata (e.g., "author", "title"), include it in the evidence block
+        # so the LLM can reason over it.
+        if state.metadata_answer:
+            meta_text = "\n".join(
+                f"{k}: {v}" for k, v in state.metadata_answer.items()
+            )
+            if meta_text:
+                tool_context_parts.insert(0, f"[Metadata]\n{meta_text}")
+
+        tool_context = "\n\n".join(tool_context_parts)
+
+        # ── Evidence sufficiency check ───────────────────────────────
         if not top_docs and not tool_context:
             web_error = web_result.get("error") if web_result else None
             has_any_retrieved_docs = bool(state.retrieved_docs)
@@ -276,29 +319,11 @@ class AnswerAgent(BaseAgent):
             state.answer = message
             state.sources = []
             state.confidence_final = state.confidence * 0.3
-            print(f"[ANSWER] No usable content — has_docs={has_any_retrieved_docs}, web_error={bool(web_error)}")
+            print(f"[ANSWER] No usable content — sources_needed={sources_needed}, "
+                  f"has_docs={has_any_retrieved_docs}, web_error={bool(web_error)}")
             return state
 
-        # --- Context-window budget check ---------------------------------
-        # Everything above builds top_docs/tool_context assuming they'll
-        # all fit. Nothing previously checked that against the model's
-        # actual context window before sending -- top_docs was capped at
-        # 3 items, but web results (tool_context) were never capped at
-        # all, and even top_docs alone (3 chunks up to max_tokens_table=
-        # 1000 tokens each, per chunker.py, if any hit a table) could
-        # exceed num_ctx on its own. Silent overflow means Ollama/Groq
-        # truncates the prompt with no signal here that it happened --
-        # possibly dropping the actual answer-bearing chunk with no
-        # error, no low-confidence flag, nothing.
-        #
-        # Fix: measure real prompt overhead (the ANSWER_PROMPT template's
-        # fixed rules/example text, plus this question) using the same
-        # provider-aware counter the chunkers use, reserve room for the
-        # model's own output, and only then work out how much budget is
-        # actually left for retrieved content. Fill that budget by
-        # priority -- protected docs first, then docs by rerank score,
-        # then web results -- and cut off (with logging) rather than
-        # silently stuffing everything in regardless of size.
+        # ── Context-window budget check ──────────────────────────────
         use_groq = getattr(self.llm, "use_groq", False)
         num_ctx = getattr(self.llm, "num_ctx", 2048)
 
@@ -312,12 +337,6 @@ class AnswerAgent(BaseAgent):
         )
 
         if available_for_context <= 0:
-            # num_ctx is too small even for the prompt scaffold + question
-            # + reserved output, before a single piece of retrieved
-            # content is added. Not a crash -- fail loudly here so it's
-            # visible, then proceed with zero context budget (the LLM
-            # will answer from the question alone, same as the "no
-            # usable content" path elsewhere in this file).
             print(
                 f"[ANSWER][BUDGET] num_ctx={num_ctx} leaves NO room for "
                 f"context (scaffold={scaffold_tokens}, reserved_output="
@@ -328,11 +347,7 @@ class AnswerAgent(BaseAgent):
             )
             available_for_context = 0
 
-        # Priority-ordered candidate blocks: protected docs are never
-        # dropped by choice (only if the budget can't fit them at all,
-        # in which case we log it explicitly rather than quietly
-        # exceeding num_ctx); everything else fills remaining budget in
-        # the order it was already ranked.
+        # Priority-ordered candidate blocks
         blocks = []
         for i, doc in enumerate(top_docs, 1):
             text = f"[Source {i}]\n{doc['text']}"
@@ -349,7 +364,7 @@ class AnswerAgent(BaseAgent):
                     "text": entry,
                     "tokens": count_tokens(entry, use_groq=use_groq),
                     "protected": False,
-                    "kind": "web",
+                    "kind": "tool",
                     "doc": None,
                 })
 
@@ -377,23 +392,26 @@ class AnswerAgent(BaseAgent):
                 + ", ".join(f"{b['kind']}({b['tokens']} tok)" for b in dropped_blocks)
             )
 
-        # Keep top_docs/tool_context in sync with what's actually being
-        # sent -- state.sources and confidence scoring below both read
-        # top_docs, and previously always matched everything built above.
-        # If a doc got dropped for budget reasons, it must also disappear
-        # from top_docs, or the UI would cite a source that was never
-        # actually shown to the LLM.
+        # Keep top_docs/tool_context in sync with what's actually sent
         top_docs = [b["doc"] for b in included_blocks if b["kind"] == "doc"]
         doc_context = "\n\n".join(b["text"] for b in included_blocks if b["kind"] == "doc")
-        tool_context = "\n\n".join(b["text"] for b in included_blocks if b["kind"] == "web")
+        tool_context = "\n\n".join(b["text"] for b in included_blocks if b["kind"] == "tool")
 
         context_parts = [p for p in (doc_context, tool_context) if p]
         context = "\n\n".join(context_parts) if context_parts else "(no context available)"
 
+        evidence_desc = []
+        if top_docs:
+            evidence_desc.append(f"{len(top_docs)} document(s)")
+        if web_result_count:
+            evidence_desc.append(f"{web_result_count} web result(s)")
+        if non_web_tool_used:
+            evidence_desc.append("tool result(s)")
+        
         print(
-            f"[ANSWER] Using {len(top_docs)} top documents"
-            + (f" + {web_result_count} web results" if tool_context else "")
-            + f" | budget: scaffold={scaffold_tokens} used={used_tokens}/"
+            f"[ANSWER] Using {', '.join(evidence_desc) if evidence_desc else 'no evidence'} "
+            f"| sources_needed={sources_needed} "
+            f"| budget: scaffold={scaffold_tokens} used={used_tokens}/"
             f"{available_for_context} num_ctx={num_ctx}"
         )
 
@@ -406,16 +424,7 @@ class AnswerAgent(BaseAgent):
             response = await self.call_llm(prompt, max_tokens=ANSWER_RESERVED_OUTPUT_TOKENS)
             state.answer = response.strip()
 
-            # 2026-08-06 fix: NEW GROUNDING LOGIC
-            # Pass state.question through so the grounding check can:
-            # 1. Extract entities from actual ROW LABELS (not question)
-            # 2. Anchor numbers to the specific row AND field they belong to
-            # 3. Catch cross-entity attribution (e.g., Moshi's value for Lychee-FD)
-            #
-            # This replaces the old question-based entity extraction which:
-            # - Missed entity aliases ("Lychee-FD (Ours)" treated as 2 entities)
-            # - Failed on pronouns ("What does it achieve?" has no entity)
-            # - Couldn't discriminate between same entity's different fields
+            # 2026-08-06 fix: Grounding verification with row/entity protection
             declined_on_ungrounded_number = not _numeric_claims_grounded(
                 state.answer, context, state.question
             )
@@ -434,15 +443,7 @@ class AnswerAgent(BaseAgent):
                     "different entity or field than the one asked about."
                 )
 
-            # NOTE: sources built from top_docs (the docs actually sent to
-            # the LLM), not all retrieved_docs - previously these could
-            # diverge if Retriever's top_k ever changed independently of
-            # AnswerAgent's top-6 slice.
-            #
-            # filename comes from RetrieverAgent's batched Mongo lookup
-            # (attached as doc['filename']). Falls back to a generic
-            # "Source N" label only if the lookup didn't run (e.g. db
-            # wasn't wired through) or the doc_id had no matching record.
+            # Source cards: only include documents that were actually sent to LLM
             state.sources = [
                 {
                     "doc_id": doc["doc_id"],
@@ -454,11 +455,7 @@ class AnswerAgent(BaseAgent):
                 for i, doc in enumerate(top_docs, 1)
             ]
 
-            # Surface web results as sources too, so citations/UI reflect
-            # what actually informed the answer -- previously these were
-            # used in the prompt (once the fix above wired them in) but
-            # never appeared in state.sources, making web-grounded answers
-            # look document-only to anything consuming state.sources.
+            # Add web results to sources if they were used
             if web_result and "error" not in web_result:
                 state.sources.extend([
                     {
@@ -472,58 +469,32 @@ class AnswerAgent(BaseAgent):
                     for i, entry in enumerate(web_result.get("results", []), 1)
                 ])
 
-            # Confidence fix: combined_score is the RRF fusion score, which
-            # is rank-based and deliberately tiny/tightly-clustered
-            # (RRF_K=60 means scores live in roughly the 0.01-0.05 range
-            # no matter how good or bad retrieval actually is). Averaging
-            # that directly into a 0-1 confidence score mathematically
-            # guarantees confidence_final lands near ~0.42-0.45 for EVERY
-            # query regardless of answer quality - which is exactly the
-            # symptom observed (confidence stuck at 0.44-0.47 across
-            # multiple different, correct answers).
-            #
-            # rerank_score (the BGE cross-encoder score) carries real
-            # signal about retrieval relevance and should be used instead.
-            # Falls back to combined_score only if reranking didn't run.
-            #
-            # 2026-07-03: use top_docs (the docs actually sent to the LLM)
-            # rather than all of state.retrieved_docs -- now that doc
-            # context is excluded entirely for web-only questions, using
-            # the full retrieved_docs list here would still drag
-            # confidence down using near-zero scores from chunks that
-            # were never shown to the model. When top_docs is empty
-            # (web-only), avg_doc_score is 0 and confidence rests solely
-            # on the planner's confidence, which is correct since there's
-            # no retrieval signal to speak of.
-            scored_docs = [
-                doc.get("rerank_score", doc.get("combined_score", 0.0))
-                for doc in top_docs
-            ]
-            avg_doc_score = sum(scored_docs) / len(scored_docs) if scored_docs else 0.0
+            # ── Confidence scoring ───────────────────────────────────
+            # Use top_docs (what was actually sent), not all retrieved_docs
+            if top_docs:
+                scored_docs = [
+                    doc.get("rerank_score", doc.get("combined_score", 0.0))
+                    for doc in top_docs
+                ]
+                avg_doc_score = sum(scored_docs) / len(scored_docs) if scored_docs else 0.0
+                avg_doc_score = max(0.0, min(avg_doc_score, 1.0))
+                state.confidence_final = min(
+                    state.confidence * 0.5 + avg_doc_score * 0.5, 1.0
+                )
+            elif non_web_tool_used:
+                # Tool-only answer is deterministic/exact
+                state.confidence_final = max(state.confidence, 0.85)
+            else:
+                # Web-only or LLM-only
+                state.confidence_final = state.confidence
 
-            # rerank_score from a cross-encoder isn't naturally bounded to
-            # [0, 1] - clamp defensively so confidence_final stays sane
-            # even if the model's raw score is outside that range.
-            avg_doc_score = max(0.0, min(avg_doc_score, 1.0))
-
-            state.confidence_final = min(
-                state.confidence * 0.5 + avg_doc_score * 0.5, 1.0
-            )
             if declined_on_ungrounded_number:
                 state.confidence_final = min(state.confidence_final, 0.3)
 
-            print(f"[ANSWER] Generated response with {len(state.sources)} sources")
+            print(f"[ANSWER] Generated response with {len(state.sources)} source(s)")
             print(f"[ANSWER] Confidence: {state.confidence_final:.2f}")
 
         except Exception as e:
-            # 2026-07-03: this was swallowing the real cause entirely --
-            # state.error was set but nothing printed it, so a failure
-            # here (e.g. prompt exceeding the model's context window
-            # after web results were added to context, a malformed
-            # ANSWER_PROMPT.format() call, or an LLM/connection error)
-            # was indistinguishable from any other failure. Print it so
-            # it's visible in eval logs instead of just "Sorry, I
-            # couldn't generate an answer" with no explanation.
             print(f"[ANSWER] Answer generation FAILED: {type(e).__name__}: {e}")
             state.error = f"Answer agent error: {str(e)}"
             state.answer = "Sorry, I couldn't generate an answer."

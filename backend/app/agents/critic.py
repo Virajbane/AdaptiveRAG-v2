@@ -21,18 +21,19 @@ class CriticAgent(BaseAgent):
     """
     Critic Agent: Validates answer quality and classifies failure type.
 
-    2026-07-XX: Enhanced to produce failure_type classification that
-    determines which component to retry:
+    2026-08-09 FIX: Now validates against ACTUAL EVIDENCE USED by AnswerAgent,
+    not just state.retrieved_docs. This includes documents, web, calculator,
+    weather, and other tool results.
+
+    Failure classification considers sources_needed:
+    - "generation": Good evidence + bad answer
+    - "retrieval": Missing/wrong evidence (routed source had no results)
+    - "planning": Correct source exists but wrong source was selected
+    - "tool": Tool execution failed
+    - "unknown": Can't confidently classify
     
-    - "generation": AnswerAgent hallucinated or failed synthesis
-    - "retrieval": Retriever returned wrong/insufficient chunks
-    - "planning": Planner misrouted (web vs docs, wrong sources)
-    - "tool": ToolAgent execution failed
-    - "unknown": Can't confidently classify (return as-is, no retry)
-    
-    STRATEGY: Use deterministic rules FIRST, only LLM-classify if
-    deterministic signals are ambiguous. This reduces token usage and
-    avoids LLM noise in classification.
+    STRATEGY: Use deterministic rules FIRST (faster, more reliable),
+    only LLM-classify when deterministic signals are ambiguous.
     """
 
     # ---- Grounding backstop -------------------------------------------
@@ -75,53 +76,146 @@ class CriticAgent(BaseAgent):
         matched = sum(1 for f in facts if f.lower() in context_lower)
         return matched / len(facts)
 
+    def _build_actual_evidence_context(self, state: AgentState) -> str:
+        """
+        Build context from the ACTUAL EVIDENCE that AnswerAgent used,
+        not just state.retrieved_docs. This includes:
+        - Documents (if "documents" was routed)
+        - Web results (if "web" was routed)
+        - Calculator results (if "calculator" was routed)
+        - Weather/Slack/Email (if "tool" was routed)
+        - Database results (if "database" was routed)
+        - Metadata (if available)
+        
+        This ensures Critic evaluates against what the LLM actually saw.
+        """
+        sources_needed = state.sources_needed or []
+        context_parts = []
+
+        # ── Documents ────────────────────────────────────────────────
+        if "documents" in sources_needed and state.retrieved_docs:
+            for i, doc in enumerate(state.retrieved_docs, 1):
+                context_parts.append(f"[Source {i}] {doc['text']}")
+
+        # ── Metadata ─────────────────────────────────────────────────
+        if state.metadata_answer:
+            meta_text = "\n".join(
+                f"{k}: {v}" for k, v in state.metadata_answer.items()
+            )
+            if meta_text:
+                context_parts.append(f"[Metadata]\n{meta_text}")
+
+        # ── Web Results ──────────────────────────────────────────────
+        if "web" in sources_needed:
+            web_result = state.tool_results.get("web_search") if state.tool_results else None
+            if web_result and "error" not in web_result:
+                entries = web_result.get("results", [])
+                for i, entry in enumerate(entries, 1):
+                    title = entry.get("title", "")
+                    snippet = entry.get("snippet") or entry.get("content") or ""
+                    context_parts.append(f"[Web {i}] {title}\n{snippet}")
+
+        # ── Calculator ───────────────────────────────────────────────
+        if "calculator" in sources_needed:
+            calc_result = state.tool_results.get("calculator") if state.tool_results else None
+            if calc_result and "error" not in calc_result:
+                expr = calc_result.get("expression", "")
+                result = calc_result.get("result")
+                if result is not None:
+                    context_parts.append(f"[Calculator Result] {expr} = {result}")
+
+        # ── Tool Results (Weather, Slack, Email) ─────────────────────
+        if "tool" in sources_needed:
+            tool_results = state.tool_results or {}
+            for kind in ("weather", "slack", "email"):
+                tool_result = tool_results.get(kind)
+                if tool_result and "error" not in tool_result:
+                    if kind == "weather":
+                        temp = tool_result.get("temperature")
+                        desc = tool_result.get("description", "")
+                        loc = tool_result.get("location", "the requested location")
+                        if temp is not None or desc:
+                            context_parts.append(
+                                f"[Weather Result] {loc}: {temp}°C, {desc}".strip()
+                            )
+                    elif kind == "slack":
+                        channel = tool_result.get("channel", "the requested channel")
+                        context_parts.append(f"[Slack Result] Message was posted to {channel}")
+                    elif kind == "email":
+                        to_email = tool_result.get("to_email", "the requested recipient")
+                        context_parts.append(f"[Email Result] Email was sent to {to_email}")
+
+        # ── Database Results ─────────────────────────────────────────
+        if "database" in sources_needed:
+            db_result = state.tool_results.get("database") if state.tool_results else None
+            if db_result and "error" not in db_result:
+                context_parts.append(f"[Database Result] {db_result}")
+
+        return "\n\n".join(context_parts) if context_parts else "(no evidence available)"
+
     # ---- Deterministic failure classification -------------------------
 
-    def _classify_failure_deterministic(self, state: AgentState, grounding_score: float, 
-                                        retrieval_score: float) -> str:
+    def _classify_failure_deterministic(self, state: AgentState, grounding_score: float,
+                                        evidence_context: str) -> str:
         """
         Attempt to classify failure type using deterministic rules.
         
         Returns the classified failure_type ("generation", "retrieval", 
-        "planning", "tool", or None if ambiguous — meaning LLM will classify).
+        "planning", "tool", or None if ambiguous).
         
-        IMPORTANT: This runs ONLY when is_valid=False. For acceptances,
-        we use the overconfident_acceptance check and don't need to classify.
+        IMPORTANT: Only called when is_valid=False (answer failed validation).
+        Must consider sources_needed to avoid false "retrieval" classifications
+        for questions that never requested documents.
         """
+        sources_needed = state.sources_needed or []
 
-        # RULE 1: No documents retrieved at all → retrieval failure
-        if not state.retrieved_docs and "documents" in state.sources_needed:
+        # RULE 1: Tool was explicitly executed but tool_results has error
+        for source in sources_needed:
+            if source in ("calculator", "weather", "slack", "email"):
+                result = state.tool_results.get(source) if state.tool_results else None
+                if result and result.get("error"):
+                    print(f"[CRITIC] Deterministic: tool '{source}' has error → failure_type=tool")
+                    return "tool"
+
+        # RULE 2: Documents were routed but not retrieved
+        if "documents" in sources_needed and not state.retrieved_docs:
+            print("[CRITIC] Deterministic: documents routed but not retrieved → failure_type=retrieval")
             return "retrieval"
 
-        # RULE 2: Retrieval score is very low despite docs being present
-        #         (could be reranking failure or semantic mismatch)
-        if retrieval_score < 0.5:  # very weak signal
-            return "retrieval"
+        # RULE 3: Web was routed but web search had no results
+        if "web" in sources_needed:
+            web_result = state.tool_results.get("web_search") if state.tool_results else None
+            if not web_result or web_result.get("error") or not web_result.get("results"):
+                print("[CRITIC] Deterministic: web routed but no web results → failure_type=tool")
+                return "tool"
 
-        # RULE 3: Tool was requested and tool execution error was recorded
-        if "tools" in state.sources_needed and state.tool_results.get("error"):
-            return "tool"
-
-        # RULE 4: Planner error was recorded (JSON parse failure, etc.)
-        if state.error and "planner" in state.error.lower():
-            return "planning"
-
-        # RULE 5: Strong grounding (facts ARE in context) but answer still
-        #         marked invalid → likely a judge error, not a generation error.
-        #         This is ambiguous without more info; LLM should classify.
+        # RULE 4: Strong grounding (facts ARE in evidence) but answer
+        #         marked invalid → judge error or answer structure issue,
+        #         likely not a generation hallucination.
         if grounding_score >= _GROUNDING_THRESHOLD_STRONG:
-            return None  # ambiguous, let LLM decide
+            print(f"[CRITIC] Deterministic: strong grounding ({grounding_score:.2f}) "
+                  f"despite invalid → ambiguous, need LLM classification")
+            return None
 
-        # RULE 6: Zero grounding (facts NOT in context) AND retrieval was
-        #         strong → generation failure (hallucination)
-        if grounding_score < _GROUNDING_THRESHOLD_WEAK and retrieval_score >= _RETRIEVAL_CONFIDENCE_THRESHOLD:
+        # RULE 5: Zero grounding (facts NOT in evidence) AND evidence is
+        #         non-empty → generation hallucination
+        if grounding_score < _GROUNDING_THRESHOLD_WEAK and evidence_context != "(no evidence available)":
+            print(f"[CRITIC] Deterministic: near-zero grounding ({grounding_score:.2f}) "
+                  f"despite evidence present → failure_type=generation")
             return "generation"
 
-        # RULE 7: Weak grounding AND weak retrieval → could be retrieval
-        if grounding_score < _GROUNDING_THRESHOLD_WEAK and retrieval_score < _RETRIEVAL_CONFIDENCE_THRESHOLD:
-            return "retrieval"
+        # RULE 6: No evidence at all (no docs, no web, no tool results)
+        #         AND something was routed to → retrieval/tool failure
+        if evidence_context == "(no evidence available)":
+            if "documents" in sources_needed:
+                print("[CRITIC] Deterministic: no evidence despite documents routed → failure_type=retrieval")
+                return "retrieval"
+            if any(s in sources_needed for s in ("web", "calculator", "tool")):
+                print("[CRITIC] Deterministic: no evidence despite tool routed → failure_type=tool")
+                return "tool"
 
-        # RULE 8: Moderate grounding (neither strong nor weak) → ambiguous
+        # RULE 7: Moderate grounding + evidence present → ambiguous
+        print("[CRITIC] Deterministic: grounding/evidence ambiguous → need LLM classification")
         return None
 
     # ---- JSON extraction (unchanged) -----------------------------------
@@ -178,14 +272,17 @@ class CriticAgent(BaseAgent):
             )
             return state
 
-        context = "\n".join([
-            f"[{i}] {doc['text'][:200]}..."
-            for i, doc in enumerate(state.retrieved_docs, 1)
+        # 2026-08-09 FIX: Build context from ACTUAL EVIDENCE used by AnswerAgent
+        evidence_context = self._build_actual_evidence_context(state)
+
+        # For LLM evaluation, include truncated evidence
+        truncated_context = "\n".join([
+            line[:200] for line in evidence_context.split("\n")
         ])
 
         prompt = CRITIC_PROMPT.format(
             question=state.question,
-            context=context,
+            context=truncated_context,
             answer=state.answer
         )
 
@@ -210,21 +307,15 @@ class CriticAgent(BaseAgent):
         critic_conf = raw_conf / 100.0 if raw_conf > 1.0 else raw_conf
         state.critic_confidence = max(0.0, min(1.0, critic_conf))
 
-        # ── Grounding backstop ────────────────────────────────────────
-        # Full context (not the 200-char-truncated preview built above)
-        # so number/entity matching isn't penalized by arbitrary truncation.
-        full_context = "\n".join(doc["text"] for doc in state.retrieved_docs)
-        grounding_score = self._compute_grounding_score(state.answer, full_context)
+        # ── Grounding check against ACTUAL EVIDENCE ──────────────────
+        grounding_score = self._compute_grounding_score(state.answer, evidence_context)
 
-        # retrieval_score computed here (moved up from below) so both
-        # override checks below can weigh it alongside grounding_score.
-        top_doc_score = None
+        # Retrieval score: average of actual evidence scores (not just docs)
+        retrieval_score = 0.5  # default neutral
         if state.retrieved_docs:
             top_doc_score = state.retrieved_docs[0].get("rerank_score", 0.5)
-        if top_doc_score is None:
-            top_doc_score = 0.5
-        retrieval_score = float(top_doc_score)
-        retrieval_score = max(0.0, min(1.0, retrieval_score))
+            if top_doc_score is not None:
+                retrieval_score = max(0.0, min(1.0, float(top_doc_score)))
 
         unexplained_rejection = (
             not state.is_valid
@@ -243,8 +334,7 @@ class CriticAgent(BaseAgent):
             state.critic_confidence = max(state.critic_confidence, 0.75)
             state.validation_issues = []
 
-        # 2026-07-10 fix — unexplained high-confidence ACCEPTANCE despite
-        # near-zero grounding (mirrored from unexplained_rejection above).
+        # Overconfident acceptance: high confidence despite near-zero grounding
         overconfident_acceptance = (
             state.is_valid
             and state.critic_confidence >= 0.8
@@ -264,7 +354,7 @@ class CriticAgent(BaseAgent):
             state.validation_issues = state.validation_issues + [
                 f"Deterministic grounding check found near-zero overlap "
                 f"(score={grounding_score:.2f}) between answer claims and "
-                f"retrieved context, despite judge approval — treating as "
+                f"available evidence, despite judge approval — treating as "
                 f"likely hallucination"
             ]
 
@@ -272,17 +362,16 @@ class CriticAgent(BaseAgent):
         # Only classify if is_valid=False (i.e., answer failed validation).
         # If the answer passed, there's no failure to classify.
         if not state.is_valid and not state.failure_type:
-            # Try deterministic classification first
+            # Try deterministic classification first (faster, more reliable)
             deterministic_type = self._classify_failure_deterministic(
-                state, grounding_score, retrieval_score
+                state, grounding_score, evidence_context
             )
 
             if deterministic_type:
                 state.failure_type = deterministic_type
-                print(f"[CRITIC] Deterministic failure classification: {deterministic_type}")
             else:
-                # Deterministic rules were ambiguous; fall back to asking the LLM
-                # (which already ran above, so we can extract from existing response)
+                # Deterministic rules were ambiguous; use LLM classification
+                # (which already ran above, so extract from existing response)
                 llm_type = criticism.get("failure_type", "unknown")
                 if llm_type not in ("generation", "retrieval", "planning", "tool"):
                     llm_type = "unknown"
@@ -301,6 +390,7 @@ class CriticAgent(BaseAgent):
         print(f"[CRITIC] Critic confidence: {state.critic_confidence:.2f}")
         print(f"[CRITIC] Grounding score:   {grounding_score:.2f}")
         print(f"[CRITIC] Retrieval score:   {retrieval_score:.4f}")
+        print(f"[CRITIC] Evidence sources:  {state.sources_needed or []}")
         print(f"[CRITIC] confidence_final:  {state.confidence_final:.4f}")
         if state.validation_issues:
             print(f"[CRITIC] Issues: {state.validation_issues}")
