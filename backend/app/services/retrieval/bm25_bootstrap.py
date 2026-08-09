@@ -46,7 +46,7 @@ async def rebuild_bm25_indexes():
             offset = next_offset
 
         if not all_points:
-            print("ℹ️  No vectors in Qdrant — BM25 index empty (upload docs first)")
+            print("INFO: No vectors in Qdrant - BM25 index empty (upload docs first)")
             return
 
         user_chunks: dict = {}
@@ -65,9 +65,9 @@ async def rebuild_bm25_indexes():
 
         for uid, chunks in user_chunks.items():
             await keyword_manager.rebuild_from_chunks(uid, chunks)
-            print(f"✅ BM25 rebuilt for user {uid[:8]}...: {len(chunks)} chunks")
+            print(f"SUCCESS: BM25 rebuilt for user {uid[:8]}...: {len(chunks)} chunks")
 
     except Exception as e:
-        print(f"⚠️  BM25 rebuild failed (non-fatal): {e}")
+        print(f"WARNING: BM25 rebuild failed (non-fatal): {e}")
         import traceback
         traceback.print_exc()
