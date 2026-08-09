@@ -33,6 +33,12 @@ class AgentOrchestrator:
       not an agent decision
     - Conversation memory save - a side effect after the graph
       completes, not part of the reasoning pipeline
+    
+    2026-08-09: Added knowledge_version parameter to cache key for
+    document RAG safety. Same canonical question now resolves to same
+    answer only when the underlying knowledge base hasn't changed.
+    Caching now uses rewritten_question (canonical form) after graph
+    execution to avoid redundant reruns on rephrased queries.
     """
 
     def __init__(self):
@@ -55,22 +61,46 @@ class AgentOrchestrator:
         question: str,
         user_id: str,
         session_id: str = "default_session",
+        knowledge_version: str = "",
     ) -> dict:
         """
         Process a question through the agent graph.
 
-        session_id identifies the conversation thread for short-term
-        memory lookups (used by RewriterAgent for context resolution,
-        and to save this turn back into the same thread below).
-        Defaults to "default_session" for backward compatibility with
-        callers that don't yet pass one explicitly.
+        Args:
+            question: The user's question.
+            user_id: Identifies the user for cache scope and memory.
+            session_id: Conversation thread ID for short-term memory lookups
+                (used by RewriterAgent for context resolution, and to save
+                this turn back into the same thread). Defaults to "default_session"
+                for backward compatibility.
+            knowledge_version: Optional document/index/knowledge base version
+                identifier. Should be set by callers when the underlying
+                knowledge base version is known (e.g., document index version,
+                database schema revision). Prevents stale cached answers after
+                knowledge updates. If not provided, defaults to empty string.
+                IMPORTANT: Do not invent a version number; only pass if
+                available from the application context.
+
+        Returns:
+            dict with keys:
+            - answer: generated response text
+            - sources: list of evidence sources
+            - sources_needed: original planner source decision
+            - confidence: final confidence score (0-1)
+            - search_time_ms: execution time
+            - is_valid: critic validation result
         """
         await self._ensure_graph()
 
         # -----------------------------
-        # Cache Check
+        # Cache Check (initial lookup)
         # -----------------------------
-        cached_result = await query_cache.get(question, user_id)
+        # Use original question for cache lookup; after graph execution,
+        # we'll cache using the canonical (rewritten) form to avoid
+        # redundant reruns on differently-phrased queries.
+        cached_result = await query_cache.get(
+            question, user_id, knowledge_version=knowledge_version
+        )
         print(f"[DEBUG] Cache hit: {cached_result is not None}")
 
         if cached_result:
@@ -137,6 +167,10 @@ class AgentOrchestrator:
         # answer must never be cached, or it gets served verbatim to
         # every future identical question for this user until the TTL
         # expires, even after the underlying bug is fixed.
+        #
+        # 2026-08-09: Cache using canonical question (rewritten_question)
+        # so that differently-phrased versions of the same semantic query
+        # hit the same cache entry after the first run.
         should_cache = (
             not final_state.error
             and final_state.answer
@@ -145,7 +179,15 @@ class AgentOrchestrator:
         )
 
         if should_cache:
-            await query_cache.set(question, user_id, result)
+            # Use rewritten_question (canonical form) as cache key; fall back
+            # to original question if no rewrite occurred.
+            canonical_question = final_state.rewritten_question or question
+            await query_cache.set(
+                canonical_question,
+                user_id,
+                result,
+                knowledge_version=knowledge_version,
+            )
         else:
             print(
                 f"[CACHE SKIP] Not caching failed/low-confidence result "
