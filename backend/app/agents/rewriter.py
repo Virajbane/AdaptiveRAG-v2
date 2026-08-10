@@ -22,15 +22,16 @@ Design notes:
     `state.rewritten_question or state.question`.
   - On any failure (LLM error, empty/unusable response, a rewrite
     that drops a personal-reference word, a numeral/quantifier, or an
-    acronym present in the original, a rewrite that diverges too far
-    from the original's actual content, or a rewrite that resembles a
-    PRIOR turn in history more than it resembles the current
-    question), state.rewritten_question stays "" so callers fall back
-    to state.question automatically. This follows BaseAgent.run()'s
-    existing convention: _execute() catches its own soft failures and
-    never raises for "just use the fallback" cases; only unexpected
-    exceptions propagate up to BaseAgent.run(), which already sets
-    state.error generically.
+    acronym present in the original, a rewrite that invents a
+    technology/database type not present in the original, a rewrite
+    that diverges too far from the original's actual content, or a
+    rewrite that resembles a PRIOR turn in history more than it
+    resembles the current question), state.rewritten_question stays ""
+    so callers fall back to state.question automatically. This follows
+    BaseAgent.run()'s existing convention: _execute() catches its own
+    soft failures and never raises for "just use the fallback" cases;
+    only unexpected exceptions propagate up to BaseAgent.run(), which
+    already sets state.error generically.
 
 2026-06-30 bug note:
   - The fast model was observed rewriting "What are my skills mentioned
@@ -142,6 +143,25 @@ Design notes:
     list (not just the token-trimmed subset used in the prompt itself),
     since that safety check should compare against everything actually
     stored, not just what fit in this particular prompt.
+
+2026-08-11 fix (Test 4 root cause -- production log investigation):
+  - "What is the total number of records in our database?" was rewritten
+    to "How many records are there in your SQL database?" -- inventing
+    "SQL" (a database TYPE the user never specified) and silently
+    swapping "our" -> "your". _dropped_personal_reference existed as a
+    backstop for exactly this class of corruption, but its regex
+    (_PERSONAL_REF) only matched "my"/"i"/"me" -- it never included
+    "our", so a rewrite that drops/alters "our" sailed through
+    undetected. Separately, there was no backstop at all against
+    inventing a specific database/tech TYPE (SQL, MongoDB, etc.) that
+    wasn't in the original question -- only the prompt's generic
+    "don't invent things" instruction, which the fast model didn't
+    reliably follow. Fixed both: added "our" to _PERSONAL_REF, and added
+    a new _invented_tech_type backstop, following the exact same
+    pattern as _dropped_or_altered_acronym (code-level check
+    independent of prompt compliance, since this project has already
+    established that pattern-in this file for anything consequential
+    to downstream routing).
 """
 
 import re
@@ -157,10 +177,13 @@ Rules:
 - Resolve pronouns/references using history (e.g. "what about X?" -> full topic + X).
 - Fix spelling only. Do not restructure the sentence.
 - Keep every word EXACTLY as written. Never delete or swap in a synonym for \
-"my"/"I"/"me" or for the user's own words like "docs"/"report"/"notes" \
+"my"/"I"/"me"/"our" or for the user's own words like "docs"/"report"/"notes" \
 ("docs" must NOT become "documentation").
 - Never invent, substitute, or answer a different question. If you are unsure \
 how to fix something, leave it unchanged rather than guessing a replacement.
+- Never invent a specific technology/database type (SQL, MongoDB, PostgreSQL, \
+etc.) that the user did not mention. "our database" must stay "our database", \
+not become "your SQL database".
 - Never expand acronyms (CGPA, RAG, API stay as-is). Never guess what one means.
 - Keep the same command form (e.g. "summarize X" stays "summarize X", not "X summary").
 - Output ONLY the rewritten question. No explanation.
@@ -177,6 +200,10 @@ Example:
 Input: "What are my skills mentioned in the docs?"
 Output: "What are my skills mentioned in the docs?"
 
+Example:
+Input: "What is the total number of records in our database?"
+Output: "What is the total number of records in our database?"
+
 Example (do NOT do this — this invents a different question):
 Input: "Who won the most recent Formula 1 race?"
 WRONG Output: "Who is the most successful driver among the top five drivers of all time?"
@@ -191,10 +218,25 @@ RIGHT Output: "Who won the most recent Formula 1 race?"
 # prior-turn context specifically.
 HISTORY_PROMPT_TOKEN_BUDGET = 800
 
-_PERSONAL_REF = re.compile(r"\b(my|i|me)\b", re.IGNORECASE)
+# 2026-08-11 fix (Test 4): added "our" -- see module docstring. Previously
+# only "my"/"i"/"me" were covered, so a rewrite that dropped/altered "our"
+# (e.g. "our database" -> "your SQL database") was never caught here.
+_PERSONAL_REF = re.compile(r"\b(my|our|i|me)\b", re.IGNORECASE)
 _QUANTIFIER_RE = re.compile(r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b", re.IGNORECASE)
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,6}\b")
 _WORD_RE = re.compile(r"[a-z0-9]+")
+
+# 2026-08-11 fix (Test 4): new backstop, same pattern as
+# _dropped_or_altered_acronym below. Catches a rewrite inventing a
+# specific database/tech TYPE the user never named -- the root cause of
+# "our database" -> "your SQL database". Deliberately a fixed list of
+# common DB/tech type names rather than a broader heuristic, matching
+# this file's established style of narrow, high-precision backstops.
+_INVENTED_TECH_TYPE_RE = re.compile(
+    r"\b(sql|postgresql|postgres|mysql|mongodb|nosql|redis|graphql|"
+    r"sqlite|oracle|mariadb|cassandra|dynamodb|firebase|supabase)\b",
+    re.IGNORECASE,
+)
 
 # Minimal function-word list for word-overlap comparisons. Deliberately
 # short — this only exists to stop overlap ratios being inflated by
@@ -290,11 +332,16 @@ def _dropped_personal_reference(original: str, rewritten: str) -> bool:
     """
     Safety net independent of prompt compliance.
 
-    If the user's original question contains "my"/"I"/"me" and the
+    If the user's original question contains "my"/"our"/"I"/"me" and the
     rewritten version doesn't contain any of them, the rewrite has
-    stripped a signal the Planner depends on for routing to
-    ["documents"]. Deliberately narrow: only this one known failure
-    mode, to avoid false-positiving on legitimate rewrites.
+    stripped (or silently swapped, e.g. "our" -> "your") a signal the
+    Planner depends on for routing to ["documents"]/["database"], and
+    which downstream generation depends on to avoid inventing an
+    unstated ownership/type. Deliberately narrow: only this one known
+    failure mode, to avoid false-positiving on legitimate rewrites.
+
+    2026-08-11: added "our" to the underlying _PERSONAL_REF regex (was
+    previously "my"/"i"/"me" only) -- see module docstring, Test 4.
     """
     return bool(_PERSONAL_REF.search(original)) and not _PERSONAL_REF.search(rewritten)
 
@@ -340,6 +387,31 @@ def _dropped_or_altered_acronym(original: str, rewritten: str) -> bool:
         return False
     rewritten_acronyms = set(_ACRONYM_RE.findall(rewritten))
     return not original_acronyms.issubset(rewritten_acronyms)
+
+
+def _invented_tech_type(original: str, rewritten: str) -> bool:
+    """
+    2026-08-11 fix (Test 4 root cause): code-level backstop for a
+    rewrite that invents a specific database/technology TYPE the user
+    never named.
+
+    Observed failure: "What is the total number of records in our
+    database?" rewritten to "How many records are there in your SQL
+    database?" -- "SQL" appears nowhere in the original question. The
+    prompt already forbids this (see REWRITE_SYSTEM_PROMPT's explicit
+    rule + example), but per this file's established pattern (see
+    _dropped_personal_reference, _dropped_or_altered_acronym),
+    prompt-only compliance isn't trusted alone for anything this
+    consequential -- an invented tech type can bias the Planner/
+    downstream tooling toward a specific (wrong, unstated) database
+    technology.
+
+    Any tech-type word appearing in the rewrite but NOT in the original
+    is treated as invented, regardless of which specific word it is.
+    """
+    orig_types = set(m.lower() for m in _INVENTED_TECH_TYPE_RE.findall(original))
+    new_types = set(m.lower() for m in _INVENTED_TECH_TYPE_RE.findall(rewritten))
+    return bool(new_types - orig_types)
 
 
 def _diverged_too_much(original: str, rewritten: str) -> bool:
@@ -474,7 +546,7 @@ class RewriterAgent(BaseAgent):
 
         if rewritten and _dropped_personal_reference(original_question, rewritten):
             print(
-                f'[REWRITER] Rewrite dropped personal reference ("my"/"I"/"me"), '
+                f'[REWRITER] Rewrite dropped personal reference ("my"/"our"/"I"/"me"), '
                 f'falling back to original question. Bad rewrite was: "{rewritten}"'
             )
             rewritten = ""
@@ -490,6 +562,14 @@ class RewriterAgent(BaseAgent):
             print(
                 f'[REWRITER] Rewrite dropped or altered an acronym present in the '
                 f'original, falling back to original question. Bad rewrite was: "{rewritten}"'
+            )
+            rewritten = ""
+
+        if rewritten and _invented_tech_type(original_question, rewritten):
+            print(
+                f'[REWRITER] Rewrite invented a technology/database type not '
+                f'present in the original, falling back to original question. '
+                f'Bad rewrite was: "{rewritten}"'
             )
             rewritten = ""
 
