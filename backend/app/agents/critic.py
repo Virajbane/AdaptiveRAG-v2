@@ -25,6 +25,16 @@ class CriticAgent(BaseAgent):
     not just state.retrieved_docs. This includes documents, web, calculator,
     weather, and other tool results.
 
+    2026-08-11 FIX (Test 1 root cause): calculator/database evidence blocks
+    below used to check `"error" not in result` -- a KEY-EXISTENCE check.
+    Every tool in this codebase (calculator_tool, sql_executor_tool) always
+    returns a dict containing "error": None on success, so the key is
+    ALWAYS present and this check was ALWAYS False, even on success. That
+    silently dropped calculator/database evidence from the critic's context
+    on every single run, producing grounding_score=0.00 for a completely
+    correct answer. Fixed to `.get("error")` (truthiness), matching the
+    (already-correct) pattern used in answer.py's _format_tool_result.
+
     Failure classification considers sources_needed:
     - "generation": Good evidence + bad answer
     - "retrieval": Missing/wrong evidence (routed source had no results)
@@ -108,7 +118,7 @@ class CriticAgent(BaseAgent):
         # ── Web Results ──────────────────────────────────────────────
         if "web" in sources_needed:
             web_result = state.tool_results.get("web_search") if state.tool_results else None
-            if web_result and "error" not in web_result:
+            if web_result and not web_result.get("error"):
                 entries = web_result.get("results", [])
                 for i, entry in enumerate(entries, 1):
                     title = entry.get("title", "")
@@ -116,9 +126,12 @@ class CriticAgent(BaseAgent):
                     context_parts.append(f"[Web {i}] {title}\n{snippet}")
 
         # ── Calculator ───────────────────────────────────────────────
+        # 2026-08-11 FIX: was `"error" not in calc_result` (key-existence,
+        # always True/present since the tool always sets "error": None on
+        # success -- see class docstring). Now checks the VALUE.
         if "calculator" in sources_needed:
             calc_result = state.tool_results.get("calculator") if state.tool_results else None
-            if calc_result and "error" not in calc_result:
+            if calc_result and not calc_result.get("error"):
                 expr = calc_result.get("expression", "")
                 result = calc_result.get("result")
                 if result is not None:
@@ -129,7 +142,7 @@ class CriticAgent(BaseAgent):
             tool_results = state.tool_results or {}
             for kind in ("weather", "slack", "email"):
                 tool_result = tool_results.get(kind)
-                if tool_result and "error" not in tool_result:
+                if tool_result and not tool_result.get("error"):
                     if kind == "weather":
                         temp = tool_result.get("temperature")
                         desc = tool_result.get("description", "")
@@ -146,9 +159,11 @@ class CriticAgent(BaseAgent):
                         context_parts.append(f"[Email Result] Email was sent to {to_email}")
 
         # ── Database Results ─────────────────────────────────────────
+        # 2026-08-11 FIX: same key-existence bug as calculator above.
+        # sql_executor_tool also always sets "error": None on success.
         if "database" in sources_needed:
             db_result = state.tool_results.get("database") if state.tool_results else None
-            if db_result and "error" not in db_result:
+            if db_result and not db_result.get("error"):
                 context_parts.append(f"[Database Result] {db_result}")
 
         return "\n\n".join(context_parts) if context_parts else "(no evidence available)"
