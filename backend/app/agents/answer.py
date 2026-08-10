@@ -1,6 +1,6 @@
 from app.agents.base import BaseAgent
 from app.agents.state import AgentState
-from app.agents.prompts import ANSWER_PROMPT
+from app.agents.prompts import ANSWER_PROMPT, DIRECT_LLM_PROMPT
 from app.utils.tokenization import count_tokens
 import re
 
@@ -49,6 +49,27 @@ _QUESTION_STOPWORDS = {
     "how", "what", "which", "who", "whom", "when", "where", "why",
     "is", "are", "was", "were", "does", "did", "do", "the", "a", "an",
 }
+
+# 2026-08-10 FIX (Test 9 — Field-level grounding): Matches metric/field names
+# asked about in the question. Ensures numeric claims are attributed not just
+# to the correct entity, but to the correct field (e.g., "S→S" vs "S→T").
+_FIELD_HINT_RE = re.compile(
+    r"\b(s\s*[-→>]+\s*s|s\s*[-→>]+\s*t|utmos|bleu|rouge|f1|accuracy|precision|"
+    r"recall|latency|lat\.|stop\.|wer|srr|sir)\b", re.IGNORECASE
+)
+
+
+def _extract_field_hint(question: str) -> str | None:
+    """
+    Extract the metric/field name from the question (e.g., "S→S", "UTMOS").
+    Used in _numeric_claims_grounded to enforce that numeric claims are
+    attributed to the correct field, not just the correct entity.
+
+    Returns:
+        The matched field hint (normalized to remove spaces), or None
+    """
+    m = _FIELD_HINT_RE.search(question)
+    return m.group(0).replace(" ", "") if m else None
 
 
 # 2026-08-09 FIX: Each tool result type gets a formatter so AnswerAgent
@@ -143,13 +164,18 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
       the same row's own field-level span
     - For prose, use the weaker sentence-level span check (no per-field split)
 
+    2026-08-10 fix (field-level grounding for Test 9):
+    - Also enforce that the field name asked about (e.g., "S→S", "UTMOS")
+      appears in the span containing the number and entity.
+    - Catches cases like "84.1 for Lychee-FD but wrong field (S→T not S→S)"
+
     This catches the "4.50 for Lychee-FD but you answered it for Moshi" bug
     by requiring an answer's cited number to appear in a span that ALSO
     contains the queried entity's row label.
 
     Returns:
         True if all numbers in the answer are properly grounded and attributed
-        False if any number is missing from context or attributed to wrong entity
+        False if any number is missing from context or attributed to wrong entity/field
     """
     numbers_in_answer = _NUM_RE.findall(answer)
     if not numbers_in_answer:
@@ -207,8 +233,19 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
             for s in spans_with_num
         )
 
+        # 2026-08-10 FIX: Also check field name if present in question
+        # This prevents accepting a number that's attributed to the right entity
+        # but the wrong field (e.g., 84.1 for Lychee-FD S→T when asked for S→S)
+        field_hint = _extract_field_hint(question)
+        if field_hint and num_is_attributed:
+            num_is_attributed = any(
+                field_hint.lower() in s.lower().replace(" ", "")
+                for s in spans_with_num if any(e.lower() in s.lower() for e in entities)
+            )
+
         if not num_is_attributed:
             # Number exists in context but not attached to any queried entity
+            # or (after 2026-08-10 fix) not attached to the correct field
             return False
 
     return True
@@ -220,7 +257,30 @@ class AnswerAgent(BaseAgent):
         # 2026-08-09 FIX: Respect routing decision. Only include evidence
         # from sources that were actually routed to by Planner.
         sources_needed = state.sources_needed or []
-        
+
+        # 2026-08-10 FIX (Test 5 — direct_llm handler): Handle direct_llm BEFORE
+        # the evidence-sufficiency gate. direct_llm questions have NO documents or
+        # tools by design — they must be answered from the LLM's own knowledge.
+        # If we don't handle this first, the gate below unconditionally declines
+        # because (correctly) there's no doc context, and the critic then hallucinates.
+        if sources_needed == ["direct_llm"]:
+            try:
+                prompt = DIRECT_LLM_PROMPT.format(question=state.question)
+                response = await self.call_llm(prompt, max_tokens=ANSWER_RESERVED_OUTPUT_TOKENS)
+                state.answer = response.strip()
+                state.sources = []
+                # Use planner's routing confidence; critic evaluates plausibility, not grounding
+                state.confidence_final = state.confidence
+                print(f"[ANSWER] direct_llm: generated answer without document/tool evidence")
+                return state
+            except Exception as e:
+                print(f"[ANSWER] direct_llm FAILED: {type(e).__name__}: {e}")
+                state.error = f"Answer agent error: {str(e)}"
+                state.answer = "Sorry, I couldn't generate an answer."
+                state.sources = []
+                state.confidence_final = 0.0
+                return state
+
         # ── Document evidence ────────────────────────────────────────
         # Include top_docs only if "documents" was routed to
         docs_wanted = "documents" in sources_needed
