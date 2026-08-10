@@ -36,6 +36,47 @@ from app.agents.state import AgentState
 # support for multi-source routing (e.g. ["documents", "web"]). Now
 # uses rewritten_question as the authoritative input to the classifier.
 #
+# v5 (2026-08-10 STAGE 11 FIX FOR 0.5B): 
+#   - Separated deterministic high-confidence routing into comprehensive layer
+#   - Expanded document-intent patterns to cover more variants
+#   - Added calculator-intent explicit detection (not just LLM)
+#   - Added weather/action-intent explicit detection (not just LLM)
+#   - Added database-intent detection (BEFORE LLM, high confidence)
+#   - Added multi-source-intent detection (BEFORE LLM, high confidence)
+#   - Added web-intent detection (high confidence patterns)
+#   - Implemented explicit parsing pipeline: raw → JSON → schema → normalization → validation
+#   - Multi-source validation now explicit and preserved
+#   - All failures are now observable (not silent)
+#   - Clear deterministic vs LLM priority model
+#   - Reordered routing layers: weather BEFORE web (prevents confusion)
+#   - Added keyword-based fallback for when LLM fails (0.5B safety net)
+#   - SOURCE_REGISTRY validation enforced at multiple points
+#
+# v6 (2026-08-10 STAGE 12 FIX -- root-cause investigation follow-up):
+#   Stage 10's planner-routing harness was found to be calling
+#   _classify_sources() directly (the LLM-only sub-step), bypassing
+#   Layer 2 deterministic routing and the Layer 3 keyword fallback
+#   entirely. That harness bug (fixed separately in stage10_eval.py)
+#   masked/exposed three real issues in THIS file, fixed here:
+#     1. _MULTI_SOURCE_INTENT required strict word-adjacency between the
+#        comparison verb and the "my/our/uploaded" reference (e.g. it
+#        matched "compare my paper" but not "compare the findings in my
+#        uploaded paper"). Added an order-independent structural
+#        detector (verb + own-content reference + external/recency
+#        reference, anywhere in the question) as a second check.
+#     2. Deterministic Layer 2 matches returned directly without ever
+#        passing through the placeholder-source check that Layer 3/4
+#        LLM-classified results went through -- so a deterministically
+#        routed "database" (implemented=False) skipped the placeholder
+#        message while an LLM-routed "database" got it. Unified both
+#        paths through one _apply_placeholder_check() helper.
+#     3. _keyword_fallback_classification() had no direct_llm branch and
+#        silently defaulted general-knowledge questions to "documents".
+#        Added an explicit direct_llm branch, and narrowed the
+#        overly-broad "what is" calculator keyword (which was shadowing
+#        direct_llm-shaped questions like "what is the capital of
+#        France") to require an actual math symbol + digit.
+#
 # SOURCE_REGISTRY is the intended single source of truth for the
 # classifier prompt AND for what tool_agent.py / graph.py treat as
 # valid. The import-time assertion below will fail fast if the prompt
@@ -46,25 +87,163 @@ from app.agents.state import AgentState
 # needs pre-answer execution) one line in graph.py's dispatch check.
 # --------------------------------------------------------------------------
 
+# Metadata query: title, author, affiliations
 _METADATA_Q = re.compile(r"\b(title|author|affiliat)", re.IGNORECASE)
 
-# Document-intent protection: high-confidence patterns that signal the
-# question is asking specifically about what a document/paper says,
-# not general knowledge. These bypass LLM inference and route directly
-# to documents.
-_DOCUMENT_INTENT = re.compile(
-    r"\b(according to the (?:paper|document|pdf|abstract)|"
-    r"in the (?:paper|document|pdf|abstract|section|appendix)|"
-    r"(?:what (?:is|does)|list) (?:reported|mentioned|described|stated) in|"
-    r"(?:figure|table|section|appendix) (?:\d+|[A-Z])|"
-    r"according to (?:figure|table|figure|section))\b",
+# =============================================================================
+# STAGE 11 FIX: COMPREHENSIVE DETERMINISTIC ROUTING PATTERNS
+# 
+# These patterns bypass LLM inference entirely. They are high-confidence
+# intent signals that should take priority over LLM classification.
+# Organized by source, with expanded variants to catch 0.5B confusion.
+# =============================================================================
+
+# Personal content indicator (shows user is asking about their own data)
+_PERSONAL_CONTENT = re.compile(
+    r"(?:"
+    r"my\s+(?:paper|pdf|file|document|research|project|study|report|data|files|work)\b|"
+    r"our\s+(?:paper|pdf|file|document|research|project|study|report|data|files|work)\b|"
+    r"(?:i\s+(?:have|uploaded|have|wrote)|we\s+(?:have|uploaded|wrote))\b|"
+    r"the\s+(?:uploaded|attached|provided)\s+(?:paper|pdf|file|document|research)\b"
+    r")",
     re.IGNORECASE
 )
 
-# Canonical source name -> config.
-# `implemented=False` means no real executor exists yet in tool_agent.py;
-# the Planner short-circuits with a placeholder instead of claiming a
-# source it can't back up.
+# Document-intent: comprehensive patterns for research paper/figure/table queries
+_DOCUMENT_INTENT = re.compile(
+    r"(?:"
+    # Explicit document-referencing phrases
+    r"according\s+to\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|study|research|report)\b|"
+    r"in\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|section|appendix|figure|table|table\s+of\s+contents)\b|"
+    # Query about what document says/reports/shows
+    r"(?:what\s+(?:is|does|did)|what's|list)\s+(?:reported|mentioned|described|stated|shown|found|demonstrated|proposed|suggested)\s+in\b|"
+    r"(?:what|which|where)\s+(?:is|are|does|did)\s+(?:reported|mentioned|in)\s+(?:the\s+)?(?:paper|document|pdf|file|study)\b|"
+    # Explicit figure/table/section references
+    r"(?:figure|table|section|appendix|appendices|fig\.|tbl\.|sec\.)\s+(?:\d+[a-z]?|[A-Z][\d.]*)\b|"
+    r"(?:from|in)\s+(?:figure|table|section|appendix)\s+(?:\d+[a-z]?|[A-Z][\d.]*)\b|"
+    r"according\s+to\s+(?:figure|table|section|appendix)\b|"
+    # Document-specific content questions
+    r"(?:table\s+of\s+)?(?:contents|results|findings|metrics|scores|benchmarks).*(?:in|from)\s+(?:the\s+)?(?:paper|document|file)\b|"
+    r"(?:the\s+)?(?:paper|document|file|study).*(?:shows?|reports?|demonstrates?|proposes?|suggests?)\s+|"
+    # Results/metrics from specific document
+    r"(?:what|which|where).*(?:utmos|bleu|rouge|f1|accuracy|precision|recall|loss|score).*(?:in|from|according\s+to)\b|"
+    r"(?:utmos|bleu|rouge|f1|accuracy|precision|recall|loss|score)\s+.*(?:according\s+to|in|from)\s+(?:the\s+)?(?:paper|document|file|table|figure)\b|"
+    # Meta-level paper questions
+    r"what\s+(?:is|are)\s+the\s+(?:contributions?|findings?|results?|conclusions?)\s+(?:of\s+)?(?:the\s+)?(?:paper|document|study)\b|"
+    r"summarize\s+(?:the\s+)?(?:paper|pdf|document|research)\b"
+    r")",
+    re.IGNORECASE
+)
+
+# Calculator-intent: mathematical operations, conversions, numeric computations
+_CALCULATOR_INTENT = re.compile(
+    r"(?:"
+    # Arithmetic operations
+    r"(?:what\s+is|calculate|compute|solve)\s+.+(?:\+|-|\*|/|÷|×).*[?\"]|"
+    r"\d+\s*(?:\+|-|\*|/|÷|×)\s*\d+|"
+    # Explicit calculator keywords
+    r"(?:what's?|calculate|compute|solve|find|simplify)\s+.+[0-9].+[?\"]|"
+    # Percentage/ratio
+    r"(?:percentage|percent|%|ratio|proportion)\s+(?:of|between|among).*[?\"]|"
+    r"what\s+(?:is|'s)\s+.+%\s+(?:of|increase|decrease).*[?\"]|"
+    r"how\s+much\s+is\s+.+%\s+of\s+\d+.*[?\"]|"
+    # Unit conversions
+    r"convert\s+.+(?:to|into|in\s+terms\s+of)\s+.+[?\"]|"
+    r"how\s+many\s+(?:meters|feet|pounds|kilograms|celsius|fahrenheit|miles|kilometers|liters|gallons)\b|"
+    r"what\s+is\s+.+\s+in\s+(?:meters|feet|pounds|kilograms|celsius|fahrenheit|miles|kilometers)\b|"
+    # Powers, roots, logarithms
+    r"(?:square|cube|square\s+root|cube\s+root|log|logarithm)\s+(?:of\s+)?[0-9.]+|"
+    # Typical calculator phrases
+    r"what\s+is\s+the\s+sum|add.*together|divide.*by|multiply.*by"
+    r")",
+    re.IGNORECASE
+)
+
+# Weather and action-intent: explicit external utility requests
+# HIGH PRIORITY: Put this BEFORE web to prevent weather→web confusion
+_WEATHER_ACTION_INTENT = re.compile(
+    r"(?:"
+    # Weather queries (many variants to catch 0.5B confusion)
+    r"(?:what's?|what\s+is)\s+(?:the\s+)?(?:weather|temperature|temp|forecast|precipitation|rain|snow|wind|humidity|climate|conditions?)\b|"
+    r"weather\s+(?:in|at|for|today|tomorrow).*[?\"]|"
+    r"(?:is\s+it|will\s+it)\s+(?:rain|snow|be\s+sunny|be\s+cloudy|be\s+cold|be\s+hot|be\s+warm).*[?\"]|"
+    r"(?:will|is)\s+(?:there|it)\s+(?:be\s+rain|be\s+snow|rain|snow).*[?\"]|"
+    r"(?:what\s+(?:is|'s)\s+the\s+)?(?:temperature|temp|weather|forecast).*(?:in|at|for|today|tomorrow|next|week).*[?\"]|"
+    # Action requests (send, post, email, message, etc.)
+    r"(?:send|post|message|email|notify|alert|slack|dm|dm\s+me|share)\s+(?:.+\s+)?(?:to|on|in|via)\b|"
+    r"(?:post|send|message|email|write|compose|create)\s+.+(?:to|into|on)\s+.*[?\"]|"
+    r"(?:create|schedule|set|add)\s+(?:a\s+)?(?:reminder|alarm|event|task|calendar\s+event)\b|"
+    r"(?:add|create|schedule)\s+(?:to\s+)?(?:my\s+)?(?:calendar|schedule|to.?do|todo|to.?do\s+list|checklist)\b|"
+    r"(?:post|share|send)\s+.+to\s+(?:#|@)?[a-z]"
+    r")",
+    re.IGNORECASE
+)
+
+# Multi-source intent: comparing user data with external information
+_MULTI_SOURCE_INTENT = re.compile(
+    r"(?:"
+    r"compare\s+(?:my|our|the\s+uploaded)\s+(?:research|paper|data|results|findings).*(?:with|to|against)\s+(?:the\s+)?(?:latest|current|recent|external)\b|"
+    r"(?:my|our|the\s+uploaded)\s+(?:research|paper|data|results)\s+.*(?:vs|versus|compared\s+to|against)\s+(?:latest|current|recent|external|public)\b|"
+    r"does?\s+(?:my|our|the\s+uploaded)\s+(?:research|paper|results|findings)\s+(?:match|align|compare|fit)\s+(?:the\s+)?(?:latest|current|recent)\b|"
+    r"verify?\s+(?:my|our)\s+(?:results|findings|analysis)\s+(?:against|with)\s+(?:current|latest|recent|external)\s+(?:data|information|benchmarks|research)\b|"
+    r"(?:check|search|look\s+in)\s+(?:my|our)\s+(?:files|documents|papers)\s+(?:and|also)\s+(?:check|search|look\s+for)\s+(?:current|latest|recent|external|online)\b"
+    r")",
+    re.IGNORECASE
+)
+
+# STAGE 12 FIX: the pattern above requires strict word-adjacency between
+# the comparison verb and the "my/our/uploaded" reference (e.g. it matches
+# "compare my paper with..." but NOT "compare the findings in my uploaded
+# paper with..." -- the extra words between "compare" and "my" break it).
+# This is an order-independent structural detector: it fires only when a
+# comparison/verification verb, a reference to the user's own content, AND
+# a reference to external/recent information ALL appear somewhere in the
+# question -- regardless of their order or adjacency. This is a general
+# three-signal check, not a hack tailored to one specific question.
+_MULTI_SOURCE_VERB = re.compile(
+    r"\b(compare|verify|cross-?check|cross-?reference)\b", re.IGNORECASE
+)
+_MULTI_SOURCE_OWN_CONTENT_REF = re.compile(
+    r"\bmy\s+\w+|\bour\s+\w+|\bthe\s+uploaded\s+\w+|"
+    r"\buploaded\s+(?:paper|pdf|file|document|research|data)\b",
+    re.IGNORECASE,
+)
+_MULTI_SOURCE_EXTERNAL_REF = re.compile(
+    r"\b(?:latest|current|recent|external|public|online)\b",
+    re.IGNORECASE,
+)
+
+# Web-intent: current/live/external information requiring search
+_WEB_INTENT = re.compile(
+    r"(?:"
+    # Temporal keywords indicating recency
+    r"(?:latest|current|recent|newest|breaking|today|this\s+week|this\s+month|2024|2025|2026)\b.*(?:news|developments?|events?|results?|updates?|benchmarks?|papers?|research|findings?)|"
+    r"what's?\s+(?:new|happening|going\s+on|the\s+latest|trending)\b|"
+    r"(?:what|what's|find|search)\s+(?:the\s+)?(?:latest|current|recent)\s+(?:news|developments?|events?|updates?|benchmarks?|papers?|research|findings?)\b|"
+    # GitHub/public repository search
+    r"(?:github|gitlab|bitbucket|repository|repo|source\s+code)\s+.*(?:search|find|look\s+for|show)\b|"
+    r"(?:search|find|show|look\s+for)\s+.*(?:on\s+github|repository|repo|on\s+(?:github|gitlab|bitbucket))\b|"
+    # External/public information requiring search
+    r"(?:search\s+(?:for|online)?|find|look\s+up|research)\s+.+(?:on\s+(?:the\s+)?(?:internet|web|online)|publicly|external)\b|"
+    r"what\s+is\s+.+on\s+(?:the\s+)?(?:internet|web|online).*[?\"]"
+    r")",
+    re.IGNORECASE
+)
+
+# Database intent: internal app data queries (moved to deterministic layer for 0.5B)
+_DATABASE_INTENT = re.compile(
+    r"(?:"
+    # Count/stat queries
+    r"how\s+many\s+(?:users?|records?|signups?|registrations?|entries?|items?|customers?|accounts?)\b.*(?:today|this|last|month|week|day|week|month|year).*[?\"]|"
+    r"what's\s+the\s+(?:total|sum|count|average|mean)\s+(?:number|count|amount)\s+of\s+(?:users?|records?|signups?|registrations?|entries?)\b|"
+    r"how\s+many\s+.+(?:created|added|registered|signed\s+up)\s+(?:in|last|this|today|this\s+week)\b|"
+    r"(?:count|get\s+the\s+count)\s+of\s+(?:users?|records?|entries?)\b.*(?:in|from)\s+(?:the\s+)?(?:database|app|system)\b|"
+    r"(?:database|app|internal\s+data|our\s+system).*(?:says|shows?|has|contains)\s+(?:how\s+many|what|total)\b"
+    r")",
+    re.IGNORECASE
+)
+
+# Canonical source name -> config
 SOURCE_REGISTRY: dict[str, dict] = {
     "documents": {
         "description": "user's uploaded files / vector DB / internal knowledge base",
@@ -101,11 +280,7 @@ SOURCE_REGISTRY: dict[str, dict] = {
 _VALID_SOURCES = set(SOURCE_REGISTRY.keys())
 _PLACEHOLDER_SOURCES = {name for name, cfg in SOURCE_REGISTRY.items() if not cfg["implemented"]}
 
-# --------------------------------------------------------------------------
-# 2026-08-09 FIX (routing bug): guardrail against SOURCE_REGISTRY /
-# PLANNER_PROMPT drift. Ensures every source registered is mentioned
-# in the prompt, so the classifier can actually select it.
-# --------------------------------------------------------------------------
+# Import-time SOURCE_REGISTRY → PLANNER_PROMPT alignment check
 _missing_from_prompt = [name for name in _VALID_SOURCES if name not in PLANNER_PROMPT]
 if _missing_from_prompt:
     raise RuntimeError(
@@ -117,91 +292,307 @@ if _missing_from_prompt:
     )
 
 
-def _parse_classifier_output(raw: str) -> list[str]:
+def _extract_json_from_text(raw: str) -> str:
     """
-    Parses the classifier's output. Handles both:
-    1. JSON array format: ["web", "calculator"]
-    2. JSON object format: {"sources": ["web"], "intent": "...", ...}
-
-    Strips code fences defensively. Any name outside SOURCE_REGISTRY is
-    dropped -- the output space is closed by design, so an unrecognized
-    name is a parse anomaly, not a new legitimate source.
-
-    2026-08-09 FIX: Updated to handle JSON objects with "sources" field,
-    which is what the PLANNER_PROMPT examples show. Previously only
-    accepted JSON arrays, causing all object-formatted responses to
-    be rejected as "nothing usable" and fall back to documents search.
-
-    2026-08-09 FIX (priming-brace robustness): PLANNER_PROMPT ends with
-    a dangling, unclosed "{" to bias the model toward JSON. That trick
-    only reliably works when the "{" is sent as a true assistant-turn
-    prefill; here it's the tail of a `system` message, with the actual
-    question passed separately as `prompt=question`. We now normalize
-    for both cases before parsing.
+    STAGE 11 FIX (Step 1): JSON extraction
+    
+    Handles:
+    1. Pure JSON (array or object) - return as-is
+    2. Markdown code fence - strip and return
+    3. JSON with surrounding text - extract via regex
+    4. Priming-brace case: model continued from prompt's trailing "{"
+       without re-emitting it - add it back
+    
+    Returns cleaned JSON string (still needs parsing).
+    Raises ValueError if no valid JSON structure found.
     """
     cleaned = raw.strip()
-    # Strip markdown code fences
-    cleaned = re.sub(r"^```(json)?|```$", "", cleaned, flags=re.MULTILINE).strip()
+    
+    # Case 1: Already starts with { or [
+    if cleaned.startswith("{") or cleaned.startswith("["):
+        cleaned = re.sub(r"```\s*$", "", cleaned, flags=re.MULTILINE).strip()
+        return cleaned
+    
+    # Case 2: Strip markdown fences
+    cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.MULTILINE).strip()
+    
+    # Case 3: Starts with { after fence stripping
+    if cleaned.startswith("{"):
+        return cleaned
+    
+    # Case 4: Priming brace case
+    if cleaned.endswith("}"):
+        return "{" + cleaned
+    
+    # Case 5: Try to extract JSON from embedded text
+    match = re.search(r"\{.*?\}", cleaned, re.DOTALL)
+    if match:
+        return match.group(0)
+    
+    # Case 6: Try to extract JSON array
+    match = re.search(r"\[.*?\]", cleaned, re.DOTALL)
+    if match:
+        return match.group(0)
+    
+    raise ValueError(f"No JSON structure found in: {raw!r}")
 
-    if not cleaned.startswith("{") and not cleaned.startswith("["):
-        if cleaned.endswith("}"):
-            # Most likely case: the model continued from the prompt's
-            # trailing "{" without re-emitting it. Add it back.
-            cleaned = "{" + cleaned
-        else:
-            # Fallback: salvage a JSON object embedded anywhere in the text.
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
-                cleaned = match.group(0)
 
+def _parse_json_to_dict(json_str: str) -> dict | list:
+    """
+    STAGE 11 FIX (Step 2): Schema validation
+    
+    Parses JSON string and ensures it's either:
+    - A dict (object)
+    - A list (array of strings)
+    
+    Raises json.JSONDecodeError or ValueError if invalid.
+    """
     try:
-        parsed = json.loads(cleaned)
-    except (json.JSONDecodeError, TypeError):
-        print(f"[PLANNER] Failed to parse JSON: {raw!r}")
-        return []
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}") from e
+    
+    if not isinstance(parsed, (dict, list)):
+        raise ValueError(
+            f"Expected dict or list, got {type(parsed).__name__}: {parsed!r}"
+        )
+    
+    return parsed
 
-    # ---- Handle JSON object with "sources" field ----
-    if isinstance(parsed, dict):
-        if "sources" in parsed and isinstance(parsed["sources"], list):
-            # Extract sources array from object
-            sources = parsed["sources"]
-            result = [s for s in sources if isinstance(s, str) and s in _VALID_SOURCES]
-            if result:
-                print(f"[PLANNER] Extracted from object: {result!r}")
-            return result
-        # Object exists but has no "sources" field
-        print(f"[PLANNER] Parsed object has no 'sources' field: {parsed}")
-        return []
 
-    # ---- Handle JSON array directly ----
+def _normalize_and_extract_sources(parsed: dict | list) -> list[str]:
+    """
+    STAGE 11 FIX (Step 3 & 4): Normalization + Source extraction
+    
+    Handles both JSON formats:
+    1. Array: ["web", "calculator"] → return as-is
+    2. Object with "sources" key: {"sources": [...], ...} → extract "sources" array
+    
+    Returns raw source list (strings, may include invalid names).
+    Next step validates against SOURCE_REGISTRY.
+    """
     if isinstance(parsed, list):
-        return [s for s in parsed if isinstance(s, str) and s in _VALID_SOURCES]
+        return parsed
+    
+    if isinstance(parsed, dict):
+        if "sources" not in parsed:
+            raise ValueError(
+                f"Dict has no 'sources' key. Keys present: {list(parsed.keys())}"
+            )
+        sources = parsed["sources"]
+        if not isinstance(sources, list):
+            raise ValueError(
+                f"'sources' value is not a list: {type(sources).__name__}"
+            )
+        return sources
+    
+    raise ValueError(f"Unexpected type after schema validation: {type(parsed)}")
 
-    # ---- Neither object nor array ----
-    print(f"[PLANNER] Parsed output is neither object nor array: {type(parsed)} = {parsed!r}")
-    return []
+
+def _validate_sources_against_registry(sources: list[str]) -> list[str]:
+    """
+    STAGE 11 FIX (Step 5): SOURCE_REGISTRY validation
+    
+    Filters sources to only those in SOURCE_REGISTRY.
+    Logs any dropped sources explicitly (observable failure).
+    
+    Returns validated sources list. May be empty if all are invalid.
+    """
+    if not sources:
+        print("[PLANNER] Extracted sources list is empty")
+        return []
+    
+    valid = []
+    invalid = []
+    
+    for source in sources:
+        if not isinstance(source, str):
+            print(f"[PLANNER] Source is not a string: {type(source).__name__} = {source!r}")
+            invalid.append(source)
+            continue
+        
+        if source in _VALID_SOURCES:
+            valid.append(source)
+        else:
+            print(f"[PLANNER] Source '{source}' not in SOURCE_REGISTRY "
+                  f"(valid: {sorted(_VALID_SOURCES)}) -- dropping it")
+            invalid.append(source)
+    
+    if invalid:
+        print(f"[PLANNER] Dropped {len(invalid)} invalid source(s): {invalid}")
+    
+    return valid
+
+
+def _parse_classifier_output(raw: str) -> list[str]:
+    """
+    STAGE 11 FIX: Explicit parsing pipeline
+    
+    Complete flow:
+        raw LLM response
+            ↓ (Step 1)
+        JSON extraction (handle code fences, priming brace, embedded JSON)
+            ↓ (Step 2)
+        schema validation (ensure dict or list)
+            ↓ (Step 3 & 4)
+        normalization & source extraction
+            ↓ (Step 5)
+        SOURCE_REGISTRY validation
+            ↓
+        result (may be empty, not silent)
+    
+    If any step fails, returns [] and logs the failure point.
+    """
+    # Step 1: Extract JSON from raw response
+    try:
+        json_str = _extract_json_from_text(raw)
+    except ValueError as e:
+        print(f"[PLANNER] Step 1 JSON extraction failed: {e}")
+        return []
+    
+    # Step 2: Parse JSON and validate schema
+    try:
+        parsed = _parse_json_to_dict(json_str)
+    except ValueError as e:
+        print(f"[PLANNER] Step 2 schema validation failed: {e}")
+        return []
+    
+    # Step 3 & 4: Normalize and extract sources
+    try:
+        sources = _normalize_and_extract_sources(parsed)
+    except ValueError as e:
+        print(f"[PLANNER] Step 3-4 normalization failed: {e}")
+        return []
+    
+    # Step 5: Validate against SOURCE_REGISTRY
+    validated = _validate_sources_against_registry(sources)
+    
+    return validated
+
+
+def _keyword_fallback_classification(question: str) -> list[str]:
+    """
+    STAGE 11 FIX: Simple keyword-based fallback for when LLM fails.
+    
+    Used when _classify_sources returns nothing or invalid.
+    This is a safety net for 0.5B model weakness.
+    
+    Returns most likely source based on simple keyword heuristics.
+
+    STAGE 12 FIX:
+      - Narrowed the calculator branch's overly-broad "what is" trigger
+        (it matched almost any question, including general-knowledge
+        ones, and always fired before the database/web/direct_llm
+        checks). It now requires an actual math symbol next to a digit,
+        in addition to the existing explicit calc keywords.
+      - Added an explicit direct_llm branch. Previously, a question that
+        matched none of weather/action/document/calculator/database/web
+        keywords silently fell through to the "documents" default, even
+        for plain general-knowledge questions with no document, tool, or
+        database signal at all.
+    """
+    q_lower = question.lower()
+    
+    # Weather/Tool keywords (HIGHEST PRIORITY to avoid weather→web confusion)
+    weather_keywords = ["weather", "temperature", "temp", "forecast", "rain", "snow", "will it"]
+    if any(kw in q_lower for kw in weather_keywords):
+        print("[PLANNER] Keyword fallback: detected weather intent → tool")
+        return ["tool"]
+    
+    action_keywords = ["send", "post", "email", "slack", "message", "alert", "notify", "create event", "set reminder"]
+    if any(kw in q_lower for kw in action_keywords):
+        print("[PLANNER] Keyword fallback: detected action intent → tool")
+        return ["tool"]
+    
+    # Document keywords (SECOND PRIORITY)
+    doc_keywords = ["paper", "pdf", "file", "document", "my research", "uploaded", "attached", "according to", "figure", "table", "section"]
+    if any(kw in q_lower for kw in doc_keywords):
+        print("[PLANNER] Keyword fallback: detected document intent → documents")
+        return ["documents"]
+    
+    # Calculator keywords -- STAGE 12 FIX: "what is" removed as a bare
+    # trigger (it collided with direct_llm questions like "what is the
+    # capital of France"). Explicit calc verbs are kept; a bare "what is"
+    # now only counts as a calculator signal when the question also has a
+    # math symbol adjacent to a digit.
+    calc_keywords = ["calculate", "solve", "convert", "percentage"]
+    has_math_symbol_with_digit = bool(
+        re.search(r"\d\s*[+\-*/]\s*\d", question) or re.search(r"[+\-*/]\s*\d", question)
+    )
+    if any(kw in q_lower for kw in calc_keywords) or has_math_symbol_with_digit:
+        print("[PLANNER] Keyword fallback: detected calculator intent → calculator")
+        return ["calculator"]
+    
+    # Database keywords
+    db_keywords = ["how many users", "how many records", "total", "database", "signed up", "users", "records"]
+    if any(kw in q_lower for kw in db_keywords):
+        print("[PLANNER] Keyword fallback: detected database intent → database")
+        return ["database"]
+    
+    # Web keywords (LOWER PRIORITY to avoid over-triggering)
+    web_keywords = ["latest", "current", "today", "breaking", "recent", "github", "search for"]
+    if any(kw in q_lower for kw in web_keywords):
+        print("[PLANNER] Keyword fallback: detected web intent → web")
+        return ["web"]
+
+    # STAGE 12 FIX: direct_llm branch -- general knowledge / definition
+    # style questions with no other matching signal. Checked before the
+    # final "documents" default so plain factual questions no longer get
+    # silently routed to a source with no matching evidence.
+    direct_llm_keywords = [
+        "what is", "what's", "who is", "who was", "define", "explain",
+        "meaning of", "how does", "how do", "why does", "why do",
+        "capital of", "what are", "difference between",
+    ]
+    if any(kw in q_lower for kw in direct_llm_keywords):
+        print("[PLANNER] Keyword fallback: detected direct_llm intent → direct_llm")
+        return ["direct_llm"]
+    
+    # Default: assume documents (safest per prompt)
+    print("[PLANNER] Keyword fallback: no match, defaulting to documents")
+    return ["documents"]
 
 
 class PlannerAgent(BaseAgent):
     """
-    Planner Agent: decides WHERE information should come from.
+    STAGE 11/12 FIX: Planner Agent with explicit deterministic-then-LLM architecture.
+    OPTIMIZED FOR 0.5B QWEN MODEL.
+    
+    Routing precedence (in order):
+      1. Metadata short-circuit (title/author questions)
+      2. Deterministic high-confidence routing (bypasses LLM)
+         - Multi-source intent (comparing uploaded with external)
+         - Document-intent (paper/figure/table/section/abstract patterns)
+         - Database-intent (counts/stats from app data)
+         - Calculator-intent (math/conversions)
+         - Weather/Action-intent (weather/send/email/calendar)
+         - Web-intent (current/latest/news)
+      3. LLM classification (for ambiguous cases)
+         - Constrained to SOURCE_REGISTRY names
+         - Explicit parsing pipeline
+         - Falls back to keyword heuristics on any parse failure
+      4. Placeholder source handling (returns placeholder instead of executing)
+    
+    Responsibility: ONLY decide WHERE information should come from.
+    Does NOT retrieve, execute tools, answer, validate, or retry.
+    
+    STAGE 11 CHANGES FOR 0.5B:
+    - Reordered routing: weather BEFORE web (prevents confusion)
+    - Multi-source detection moved to Layer 2 (deterministic)
+    - Database detection moved to Layer 2 (deterministic)
+    - Added keyword-based fallback for LLM failures
+    - All failures are observable (extensive logging)
+    - Clear deterministic vs LLM priority model
 
-    Does NOT retrieve, execute tools, answer, validate, or retry --
-    those belong to other agents/nodes.
-
-    Routing precedence:
-      1. Metadata short-circuit (title/author questions).
-      2. Document-intent protection (high-confidence paper/figure/table
-         patterns) → routes to documents without LLM inference.
-      3. LLM classification, constrained to SOURCE_REGISTRY's names.
-         Falls back to ["documents"] on any parse failure or empty
-         result. Placeholder sources short-circuit with a placeholder
-         answer instead of being sent downstream.
-
-    2026-08-09 FIX: Now uses rewritten_question as the authoritative
-    question for classification. Added document-intent protection for
-    research paper evaluation questions. Supports multi-source outputs
-    (e.g. ["documents", "web"]).
+    STAGE 12 CHANGES:
+    - Multi-source deterministic detection now also uses an
+      order-independent three-signal check (verb + own-content +
+      external-content), fixing missed phrasings like "compare the
+      findings in my uploaded paper with the latest external research".
+    - Deterministic Layer 2 matches and Layer 3 LLM/keyword-fallback
+      matches now go through the SAME placeholder-source check
+      (_apply_placeholder_check), so a not-yet-implemented source is
+      handled identically no matter which layer classified it.
     """
 
     def __init__(self, llm, db=None):
@@ -221,84 +612,254 @@ class PlannerAgent(BaseAgent):
 
     async def _classify_sources(self, question: str) -> list[str]:
         """
-        Single, compact, constrained classification call. One routing
-        decision, then stop -- no chain-of-thought, per latency requirement.
-
-        2026-08-09 FIX: Now uses llm.acomplete() with system+prompt signature.
+        Single-turn LLM classification. One routing decision, then stop.
+        No chain-of-thought, per latency requirement.
+        
+        STAGE 11 CHANGES:
+        - Explicit error handling with observable logging
+        - Returns [] on any error (caller decides fallback)
         """
         try:
-            # Call the LLM with system prompt + user question
-            # PLANNER_PROMPT comes from prompts.py and is the source of truth
             response = await self.llm.acomplete(
                 system=PLANNER_PROMPT,
                 prompt=question,
                 temperature=0,
                 max_tokens=40,
             )
-            # Extract text from response object
             raw = response.text if hasattr(response, "text") else str(response)
         except AttributeError as exc:
-            # Catch if acomplete() method is missing
-            print(f"[PLANNER] Classifier call failed: {exc!r} -- defaulting to documents")
+            print(f"[PLANNER] LLM method missing: {exc!r}")
             return []
         except Exception as exc:
-            # Catch other LLM errors (network, timeout, invalid key, etc.)
-            print(f"[PLANNER] LLM error: {exc!r} -- defaulting to documents")
+            print(f"[PLANNER] LLM call failed: {exc!r}")
             return []
 
+        # Parse using explicit pipeline
         sources = _parse_classifier_output(raw)
-        print(f"[PLANNER] Classifier sources: {sources!r} (raw={raw!r})")
+        print(f"[PLANNER] LLM classified: {sources!r}")
         return sources
 
-    async def _execute(self, state: AgentState) -> AgentState:
-        # Use rewritten_question if available, else fall back to original question
-        question_to_classify = state.rewritten_question or state.question
-        original_question = state.question
+    def _apply_placeholder_check(
+        self, state: AgentState, sources: list[str], confidence: float
+    ) -> AgentState:
+        """
+        STAGE 12 FIX: unified placeholder-source handling.
 
-        # ---- Metadata short-circuit ----
-        if _METADATA_Q.search(original_question):
-            doc_metadata = await self._get_document_metadata(state)
-            if doc_metadata:
-                print(f"[PLANNER] Metadata question detected, using stored "
-                      f"metadata directly: {doc_metadata}")
-                state.metadata_answer = doc_metadata
-                state.sources_needed = ["metadata"]
-                return state
-            print("[PLANNER] Metadata question detected but no stored "
-                  "metadata found — falling through to normal routing")
+        Previously, deterministic Layer 2 matches returned directly from
+        _execute() without ever checking _PLACEHOLDER_SOURCES, while only
+        LLM/keyword-classified (Layer 3/4) results went through the
+        placeholder check. That meant a not-yet-implemented source (e.g.
+        "database") behaved differently depending on which layer picked
+        it -- deterministic routing would try to hand it downstream for
+        execution, while LLM routing would correctly short-circuit to a
+        placeholder message.
 
-        # ---- Document-intent protection (high-confidence bypass) ----
-        # Catches research paper evaluation questions without LLM inference.
-        # Examples: "What is Lychee-FD's UTMOS score in Figure 4?"
-        #           "According to the paper, what does Table 3 show?"
-        if _DOCUMENT_INTENT.search(question_to_classify):
-            print(f"[PLANNER] Document-intent pattern detected in: "
-                  f"{question_to_classify[:60]}... → routing to documents")
-            state.sources_needed = ["documents"]
-            state.confidence = 0.95
-            return state
-
-        # ---- LLM classification ----
-        sources = await self._classify_sources(question_to_classify)
-
-        if not sources:
-            print("[PLANNER] Classifier returned nothing usable — "
-                  "defaulting to sources=['documents']")
-            state.sources_needed = ["documents"]
-            state.confidence = 0.5
-            return state
-
+        This helper is now the single place that decides "is any of this
+        source list not yet implemented" and is called from every layer
+        (2, 3, and 4) so the behavior is identical regardless of which
+        layer made the routing decision.
+        """
         placeholder_hits = [s for s in sources if s in _PLACEHOLDER_SOURCES]
+
         if placeholder_hits:
-            print(f"[PLANNER] Classifier picked placeholder source(s) "
-                  f"{placeholder_hits!r} -- returning placeholder")
+            print(f"[PLANNER] Routed source(s) {placeholder_hits!r} "
+                  f"not yet implemented")
             state.sources_needed = placeholder_hits
             state.metadata_answer = {
                 "placeholder": f"{placeholder_hits[0]} integration is under development."
             }
+            state.confidence = min(confidence, 0.6)
             return state
 
         state.sources_needed = sources
-        state.confidence = 0.6
-        print(f"[PLANNER] Sources (classified): {state.sources_needed}")
+        state.confidence = confidence
         return state
+
+    def _deterministic_multi_source_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence multi-source detection.
+        Moved to EARLY in routing (before single-source patterns).
+        
+        If detected, returns ["documents", "web"] (high confidence 0.95).
+        If not detected, returns None (continue to next pattern).
+        
+        Covers: compare X with latest, verify results against current, etc.
+
+        STAGE 12 FIX: added a second, order-independent check
+        (_MULTI_SOURCE_VERB + _MULTI_SOURCE_OWN_CONTENT_REF +
+        _MULTI_SOURCE_EXTERNAL_REF all present anywhere in the question)
+        so phrasing that breaks the original pattern's strict word-
+        adjacency (e.g. extra words between "compare" and "my") is still
+        caught deterministically instead of falling through to the LLM.
+        """
+        if _MULTI_SOURCE_INTENT.search(question):
+            print(f"[PLANNER] Multi-source-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["documents", "web"]
+
+        if (
+            _MULTI_SOURCE_VERB.search(question)
+            and _MULTI_SOURCE_OWN_CONTENT_REF.search(question)
+            and _MULTI_SOURCE_EXTERNAL_REF.search(question)
+        ):
+            print(f"[PLANNER] Multi-source-intent (order-independent) "
+                  f"detected: {question[:70]}...")
+            return ["documents", "web"]
+
+        return None
+
+    def _deterministic_document_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence document-intent detection.
+        
+        If detected, returns ["documents"] (high confidence 0.95).
+        If not detected, returns None (LLM will decide).
+        
+        Covers: paper/pdf/abstract/figure/table/section references,
+        document-specific metrics, "according to the paper", etc.
+        """
+        if _DOCUMENT_INTENT.search(question):
+            print(f"[PLANNER] Document-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["documents"]
+        return None
+
+    def _deterministic_database_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence database-intent detection.
+        Moved to deterministic layer (was in LLM, low priority).
+        
+        If detected, returns ["database"] (high confidence 0.95).
+        If not detected, returns None (LLM will decide).
+        
+        Covers: how many users/records, total, sum, app database queries.
+        """
+        if _DATABASE_INTENT.search(question):
+            print(f"[PLANNER] Database-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["database"]
+        return None
+
+    def _deterministic_calculator_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence calculator-intent detection.
+        
+        If detected, returns ["calculator"] (high confidence 0.95).
+        If not detected, returns None (LLM will decide).
+        
+        Covers: arithmetic, percentages, unit conversions, powers, roots.
+        """
+        if _CALCULATOR_INTENT.search(question):
+            print(f"[PLANNER] Calculator-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["calculator"]
+        return None
+
+    def _deterministic_weather_action_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence weather/action-intent detection.
+        MOVED BEFORE WEB (prevents weather→web confusion in 0.5B).
+        
+        If detected, returns ["tool"] (high confidence 0.95).
+        If not detected, returns None (LLM will decide).
+        
+        Covers: weather queries, send/post/email/Slack actions, 
+        calendar/reminder creation.
+        """
+        if _WEATHER_ACTION_INTENT.search(question):
+            print(f"[PLANNER] Weather/action-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["tool"]
+        return None
+
+    def _deterministic_web_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 11: High-confidence web-intent detection.
+        MOVED AFTER weather (to avoid weather→web confusion).
+        
+        If detected, returns ["web"] (high confidence 0.9).
+        If not detected, returns None (LLM will decide).
+        
+        Covers: latest news, current events, recent benchmarks,
+        breaking news, public repositories.
+        """
+        if _WEB_INTENT.search(question):
+            print(f"[PLANNER] Web-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["web"]
+        return None
+
+    async def _execute(self, state: AgentState) -> AgentState:
+        # Use rewritten_question if available, else fall back to original
+        question_to_classify = state.rewritten_question or state.question
+        original_question = state.question
+
+        # ---- Layer 1: Metadata short-circuit ----
+        if _METADATA_Q.search(original_question):
+            doc_metadata = await self._get_document_metadata(state)
+            if doc_metadata:
+                print(f"[PLANNER] Metadata question detected, using stored metadata")
+                state.metadata_answer = doc_metadata
+                state.sources_needed = ["metadata"]
+                state.confidence = 0.95
+                return state
+            print("[PLANNER] Metadata question detected but no metadata found")
+
+        # ---- Layer 2: Deterministic high-confidence routing ----
+        # Reordered for 0.5B: check multi-source first, then single sources
+        # Weather is checked BEFORE web (prevents confusion)
+        #
+        # STAGE 12 FIX: every Layer 2 match now goes through
+        # _apply_placeholder_check() instead of writing state directly, so
+        # a deterministically-routed not-yet-implemented source behaves
+        # identically to one classified by the LLM/keyword fallback.
+
+        # Multi-source (highest priority for comparing/verifying)
+        deterministic = self._deterministic_multi_source_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Document-intent (very specific, high confidence)
+        deterministic = self._deterministic_document_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Database-intent (moved to deterministic for 0.5B)
+        deterministic = self._deterministic_database_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Calculator-intent
+        deterministic = self._deterministic_calculator_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Weather/Action-intent (BEFORE web)
+        deterministic = self._deterministic_weather_action_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Web-intent (AFTER weather)
+        deterministic = self._deterministic_web_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.9)
+
+        # ---- Layer 3: LLM classification (for remaining ambiguous cases) ----
+        sources = await self._classify_sources(question_to_classify)
+
+        # If LLM failed, try keyword fallback (0.5B safety net)
+        if not sources:
+            print("[PLANNER] LLM classification returned nothing, trying keyword fallback")
+            sources = _keyword_fallback_classification(question_to_classify)
+
+        if not sources:
+            # Final fallback: assume documents query
+            print("[PLANNER] All routing failed, defaulting to documents")
+            state.sources_needed = ["documents"]
+            state.confidence = 0.5
+            return state
+
+        # ---- Layer 4: Placeholder source handling ----
+        # STAGE 12 FIX: now the SAME helper used by Layer 2, instead of a
+        # duplicated inline check -- one placeholder policy, one place.
+        return self._apply_placeholder_check(state, sources, 0.7)
