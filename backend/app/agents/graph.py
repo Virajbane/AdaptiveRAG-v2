@@ -1,22 +1,34 @@
 """
 LangGraph orchestration for the RAG agent pipeline — Option B with smart retry routing.
 
-Flow:
+Flow (2026-08-10 fix):
 
-    START → rewriter ──┬──→ planner ───┐
-                        └──→ retriever ─┴──→ join → grader ──(route_after_planning)──→ tool_agent ──→ answer ──→ critic
-                                                                  ├──────────────────────────────────────→ answer ──┐
-                                                                  ├──→ no_answer ──→ END                        │
-                                                                  ├──→ metadata_answer ──→ END                  │
-                                                                  └──→ placeholder_answer ──→ END                │
-                                                                                                                  │
-                                                            route_after_critic:                                  │
-                                                              generation → answer (retry only answer)          │
-                                                              retrieval  → retriever (re-fetch docs)           │
-                                                              planning   → planner (re-route)                  │
-                                                              tool       → tool_agent (re-execute)             │
-                                                              unknown    → END (return as-is)                  │
-                                                              done       → END                                  │
+    START → rewriter → planner ──(route_after_planning, check documents first)──┐
+                                                                                  ├─ retriever → grader ─┐
+                                                                                  ├─ tool_agent ────────┤
+                                                                                  ├─ answer ────────────┤
+                                                                                  ├─ no_answer ─────────┤
+                                                                                  ├─ metadata_answer ───┤
+                                                                                  └─ placeholder_answer ┤
+                                                                                                         │
+                                                                                                         ↓
+                                                                                                       answer
+                                                                                                         │
+                                                                                                       critic
+                                                                                                         │
+                                                                            route_after_critic (retry dispatch):
+                                                                              generation → answer (retry)
+                                                                              retrieval  → retriever
+                                                                              planning   → planner
+                                                                              tool       → tool_agent
+                                                                              unknown    → END
+                                                                              done       → END
+
+KEY CHANGE (2026-08-10 Test 6 fix):
+Retriever moved from parallel unconditional (rewriter → retriever) to CONDITIONAL edge
+gated on "documents" in sources_needed. For calculator/weather/web/direct_llm queries,
+retrieval is now skipped entirely (~10-24s saved per non-document query). Planner
+decision is the single source of truth for what sources are needed.
 
 2026-08-08 update: route_after_planning now dispatches to tool_agent
 for "web", "tool", AND "calculator" (previously only web/tools, and
@@ -84,7 +96,7 @@ def build_agent_graph(db=None):
     fast_llm = LLMProvider(model=settings.OLLAMA_FAST_MODEL)          # qwen2.5:1.5b — routing / judging
 
     rewriter   = RewriterAgent(fast_llm)
-    planner    = PlannerAgent(fast_llm, db=db)
+    planner    = PlannerAgent(llm, db=db)
     retriever  = RetrieverAgent(fast_llm, db=db)
     grader     = GraderAgent(fast_llm)
     tool_agent = ToolAgent(fast_llm)
@@ -141,9 +153,6 @@ def build_agent_graph(db=None):
         if result.error:
             update["error"] = result.error
         return update
-
-    async def join_node(state: AgentState) -> dict:
-        return {}
 
     @traceable(name="grader_node", run_type="chain")
     async def grader_node(state: AgentState) -> dict:
@@ -240,7 +249,12 @@ def build_agent_graph(db=None):
     # ── Routing functions ─────────────────────────────────────────────────
 
     def route_after_planning(state: AgentState) -> str:
-        """Route to the appropriate next node based on planner output."""
+        """
+        2026-08-10 FIX: Route AFTER planner, checking for document-needing
+        sources FIRST. This gates retriever on "documents" in sources_needed,
+        eliminating ~10-24s of unconditional retrieval for non-document queries
+        (calculator, weather, web, direct_llm).
+        """
 
         # Metadata short-circuit (highest priority)
         if "metadata" in state.sources_needed and state.metadata_answer:
@@ -255,22 +269,29 @@ def build_agent_graph(db=None):
                   f"→ placeholder_answer_node")
             return "placeholder_answer"
 
-        # Hard retrieval rejection
+        # Hard retrieval rejection (only if documents were actually routed)
         if state.retrieval_rejected and "documents" in state.sources_needed:
             print("[ROUTER] Retrieval rejected by grader → no_answer_node")
             return "no_answer"
 
         # Error propagation
         if state.error:
-            print(f"[ROUTER] Error detected, skipping tool_agent: {state.error}")
+            print(f"[ROUTER] Error detected, skipping to answer: {state.error}")
             return "answer"
+
+        # Document-needing queries (including multi-source like ["documents", "web"])
+        # MUST go through retriever first to load docs. Retriever then feeds to
+        # grader → answer for assessment and confidence scoring.
+        if "documents" in state.sources_needed:
+            print(f"[ROUTER] Planner requested documents → retriever")
+            return "retriever"
 
         # Sources requiring tool_agent execution before answering
         if any(s in state.sources_needed for s in _TOOL_EXECUTION_SOURCES):
             print(f"[ROUTER] Planner requested {state.sources_needed} → tool_agent")
             return "tool_agent"
 
-        # documents / direct_llm / anything else with no execution step
+        # direct_llm / anything else with no tool execution needed
         if state.sources_needed:
             print(f"[ROUTER] Planner sources_needed={state.sources_needed} → answer")
             return "answer"
@@ -384,7 +405,6 @@ def build_agent_graph(db=None):
     graph.add_node("rewriter",             rewriter_node)
     graph.add_node("planner",              planner_node)
     graph.add_node("retriever",            retriever_node)
-    graph.add_node("join",                 join_node)
     graph.add_node("grader",               grader_node)
     graph.add_node("tool_agent",           tool_node)
     graph.add_node("answer",               answer_node)
@@ -398,21 +418,19 @@ def build_agent_graph(db=None):
     graph.add_node("increment_planner_retry",    increment_planner_retry)
     graph.add_node("increment_tool_retry",       increment_tool_retry)
 
-    # ── Edges: Main pipeline ──────────────────────────────────────────────
+    # ── Edges: Main pipeline (2026-08-10 FIX: retriever now conditional) ──
 
     graph.add_edge(START, "rewriter")
     graph.add_edge("rewriter", "planner")
-    graph.add_edge("rewriter", "retriever")
 
-    graph.add_edge("planner",   "join")
-    graph.add_edge("retriever", "join")
-
-    graph.add_edge("join", "grader")
-
+    # 2026-08-10 FIX: Retriever is NO LONGER parallel/unconditional.
+    # It's now a conditional edge from planner, gated on "documents" in sources_needed.
+    # This eliminates ~10-24s of wasted retrieval on non-document queries.
     graph.add_conditional_edges(
-        "grader",
+        "planner",
         route_after_planning,
         {
+            "retriever":            "retriever",     # NEW: conditional on "documents"
             "tool_agent":           "tool_agent",
             "answer":               "answer",
             "no_answer":            "no_answer",
@@ -421,9 +439,17 @@ def build_agent_graph(db=None):
         },
     )
 
+    # Retriever always feeds to grader for assessment (if it runs at all)
+    graph.add_edge("retriever", "grader")
+
+    # Grader always feeds to answer for confidence scoring and response synthesis
+    graph.add_edge("grader", "answer")
+
+    # Tool and answer nodes both feed to critic
     graph.add_edge("tool_agent", "answer")
     graph.add_edge("answer",     "critic")
 
+    # Special case endpoints (no critic needed)
     graph.add_edge("no_answer",          END)
     graph.add_edge("metadata_answer",    END)
     graph.add_edge("placeholder_answer", END)
