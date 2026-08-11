@@ -36,6 +36,13 @@ in terms of "source of information", tool_registry speaks in terms of
 5. Added tool_result_formatter() for Answer agent to use.
 6. Wired database source handler.
 7. Simplified error handling and logging for clarity.
+
+2026-08-10 FIX (Tests 2-3 — Weather keyword sync):
+8. Broadened _WEATHER_KEYWORDS to match planner's own _WEATHER_ACTION_INTENT
+   patterns. The planner correctly detects "rain", "snow", action verbs, etc.,
+   but that knowledge was thrown away (reduced to bare "tool" string).
+   tool_agent was re-detecting with a narrower regex, causing "Mumbai rain"
+   to fail routing. Now both use the same keyword set.
 """
 
 import re
@@ -47,7 +54,16 @@ from app.services.tools.registry import tool_registry
 
 _MATH_EXPR = re.compile(r"[-+/*^%().\d\s]{3,}")
 
-_WEATHER_KEYWORDS = re.compile(r"\b(weather|temperature|forecast|climate|temp)\b", re.IGNORECASE)
+# 2026-08-10 FIX: Broadened to match planner's weather intent detection.
+# Planner's _WEATHER_ACTION_INTENT already checks for these patterns;
+# tool_agent must use the same set or weather questions will be missed
+# (e.g., "Mumbai rain" has "rain" which planner detects, but tool_agent's
+# old regex was too narrow and couldn't find it, causing a routing failure).
+_WEATHER_KEYWORDS = re.compile(
+    r"\b(weather|temperature|forecast|climate|temp|rain|snow|sunny|cloudy|"
+    r"humid|windy|precipitation)\b|will\s+it\s+(?:rain|snow)",
+    re.IGNORECASE,
+)
 
 # Explicit product names -- checked FIRST so a question that names its
 # target ("send an email...", "post this in slack...") is never
