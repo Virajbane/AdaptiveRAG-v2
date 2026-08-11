@@ -1,99 +1,137 @@
 """
-2026-08-09 UPDATE: Consolidated all agent prompts in this file.
-This is the single source of truth for all system prompts used by:
-- PlannerAgent (PLANNER_PROMPT)
-- RewriterAgent (REWRITE_SYSTEM_PROMPT)
-- CriticAgent (CRITIC_PROMPT)
-- AnswerAgent (ANSWER_PROMPT)
-- ToolAgent (TOOL_PROMPT)
+2026-08-10 STAGE 11 FIX: Prompts optimized for 0.5B Qwen Planner
 
-Import these in your agent files instead of hardcoding prompts.
+This file contains all agent system prompts:
+- PLANNER_PROMPT (OPTIMIZED FOR 0.5B - fewer rules, clearer examples)
+- REWRITE_SYSTEM_PROMPT
+- CRITIC_PROMPT
+- ANSWER_PROMPT
+- DIRECT_LLM_PROMPT (2026-08-10 NEW: for general knowledge questions)
+- TOOL_PROMPT
 
-2026-08-09 FIX (routing bug): PLANNER_PROMPT now includes explicit rules
-for "direct_llm" and "database" sources that were previously defined in
-SOURCE_REGISTRY but unreachable by the classifier. Added document-intent
-rules for Figure/Table/Section queries. Added multi-source routing examples
-(documents + web, documents + tool). planner.py now asserts at import time
-that every SOURCE_REGISTRY key appears somewhere in this string, so this
-kind of drift fails loudly instead of silently.
-
-2026-08-09 ENHANCEMENT: Added high-confidence document-intent rules:
-- "According to the paper/document/PDF"
-- "In Figure X / Table Y / Section Z"
-- "What does the paper say / report / mention"
-These route to documents without requiring LLM inference.
+Key changes for 0.5B:
+1. PLANNER_PROMPT reduced from 11 rules to 7 (small models handle fewer concepts)
+2. Weather rule moved BEFORE web rule (prevents weather→web confusion)
+3. Multi-source rules moved earlier (rule #4 instead of #9)
+4. More examples, simpler language
+5. Repeated emphasis on closed output space (do NOT hallucinate source names)
 """
 
 # =============================================================================
-# PLANNER_PROMPT: Single-turn classification of question's information needs.
-# Outputs JSON object with "sources" array constrained to SOURCE_REGISTRY.
+# PLANNER_PROMPT: OPTIMIZED FOR 0.5B QWEN
 # =============================================================================
-#
-# Rules prioritize in order:
-# 1. Explicit document-intent phrases
-# 2. Personal data (my/I/we/our)
-# 3. Calculation/math
-# 4. External APIs (weather/email/Slack/etc)
-# 5. Current events/news
-# 6. General knowledge (no data needed)
-# 7. Database queries
-# 8. Comparison across sources (documents + web, documents + tool)
-#
-# Fallback: unsure -> documents (assume they're asking about their data)
+# Strategy: Fewer rules, clearer priorities, more examples
+# Reduces from 11 rules to 7, prioritizes high-confidence intent detection
 
-PLANNER_PROMPT = """Classify the question below. Output only ONE JSON object with "sources" array.
+PLANNER_PROMPT = """Classify the question to determine what information source(s) are needed.
 
-Rules (in priority order):
+Output ONLY ONE JSON object. Do not output anything else. No extra text.
 
-1. Contains explicit document-intent phrases ("according to the paper", "in Figure X", "in Section Y", "what does the document say") -> sources: ["documents"]
+Valid source names (ONLY these, nothing else):
+- documents (user's uploaded files, PDFs, papers, reports, my documents)
+- web (current news, latest info, recent research, GitHub repositories)
+- calculator (math, arithmetic, unit conversion, percentage calculation)
+- tool (weather, send email, post message, create event, Slack, calendar)
+- database (counts, stats from our app's own internal data)
+- direct_llm (general knowledge, definitions, explanations, no data needed)
 
-2. Contains "my"/"I"/"me"/"our" about personal content or uploads -> sources: ["documents"]
+Decision Rules (in priority order):
 
-3. Contains math/calculation/solve/percentage/unit conversion -> sources: ["calculator"]
+1. **Document-specific question** (about uploaded files/papers/figures):
+   - "According to the paper/document/PDF/file"
+   - "In Figure X", "In Table Y", "In Section Z"
+   - "What does the paper/document say/report/show"
+   - "My paper/PDF/document says..."
+   → {"sources": ["documents"]}
 
-4. Contains weather/temperature/forecast/climate OR "post"/"send"/"alert"/"message"/"email"/"Slack" with action intent -> sources: ["tool"]
+2. **Math/Calculation** (numbers, arithmetic, conversions):
+   - "What is X + Y", "Calculate...", "Solve..."
+   - "Convert 100 km to miles", "What's 50% of 200"
+   - "What's the ratio", "How many meters in feet"
+   → {"sources": ["calculator"]}
 
-5. Public fact, current events, breaking news, latest benchmarks, recent developments -> sources: ["web"]
+3. **Weather or Action/Tool** (weather, email, Slack, calendar) [BEFORE web]:
+   - Weather: "What's the weather", "Will it rain", "Forecast", "Temperature"
+   - Action: "Send email to", "Post message to", "Alert", "Slack notification"
+   - Schedule: "Create event", "Set reminder", "Add to calendar"
+   → {"sources": ["tool"]}
 
-6. GitHub repository search, code repository queries, public source code -> sources: ["web"]
+4. **Comparing uploaded content with external info** [HIGH PRIORITY]:
+   - "Compare my research/uploaded data with latest/current benchmarks"
+   - "Does my paper match the recent findings"
+   - "Verify my results against current data"
+   → {"sources": ["documents", "web"]}
 
-7. General knowledge, definitions, explanations, "what is X", no personal data or documents needed -> sources: ["direct_llm"]
+5. **Current/Latest Information** (news, recent events, live data):
+   - "Latest news", "Recent research", "Breaking", "Today", "This week"
+   - "What's the latest benchmarks", "Recent developments"
+   - "Search GitHub", "Search repositories"
+   → {"sources": ["web"]}
 
-8. Counts/stats/records from OUR OWN app database (not the user's documents) -> sources: ["database"]
+6. **App Database** (internal counts, stats, user data):
+   - "How many users/records/signups [in our app]"
+   - "What's the total/sum/count [in database]"
+   - "Database statistics", "App metrics"
+   → {"sources": ["database"]}
 
-9. Explicitly asks to compare "my" uploaded content against external/current info -> sources: ["documents", "web"]
+7. **General Knowledge** (no data lookup needed):
+   - "What is...", "Define...", "Explain...", "Who was..."
+   - Does NOT reference documents, does NOT ask for current/live info
+   - "How does photosynthesis work", "What is the capital of France"
+   → {"sources": ["direct_llm"]}
 
-10. Asks to search uploaded docs AND check external info (tools/weather/email) -> sources: ["documents", "tool"]
+8. **Fallback** (unsure or ambiguous):
+   → {"sources": ["documents"]}
 
-11. Unsure or ambiguous -> sources: ["documents"]
+CRITICAL INSTRUCTIONS:
+- Output EXACTLY ONE JSON object like: {"sources": ["documents"]}
+- You MUST ONLY use source names from the list above
+- Do NOT create new source names like "papers", "search", "weather", "email"
+- Do NOT output extra text, reasoning, or multiple objects
+- Do NOT output {"sources": []} (empty sources) - choose a category
 
-Examples (format only):
-Q: "What is 235 * 18?" → {"sources": ["calculator"], "confidence": 0.95}
-Q: "What is the weather in Mumbai?" → {"sources": ["tool"], "confidence": 0.9}
-Q: "Post a message to #eng-alerts" → {"sources": ["tool"], "confidence": 0.95}
-Q: "Latest AI benchmarks 2026" → {"sources": ["web"], "confidence": 0.9}
-Q: "What is my CGPA?" → {"sources": ["documents"], "confidence": 0.95}
-Q: "What is the capital of France?" → {"sources": ["direct_llm"], "confidence": 0.9}
-Q: "How many users signed up last week?" → {"sources": ["database"], "confidence": 0.85}
-Q: "According to Figure 4, what is the UTMOS score?" → {"sources": ["documents"], "confidence": 0.95}
-Q: "In the paper, what does Table 3 show?" → {"sources": ["documents"], "confidence": 0.95}
-Q: "What does my report say about GPT-4?" → {"sources": ["documents"], "confidence": 0.9}
-Q: "Compare my uploaded research with latest papers on transformers" → {"sources": ["documents", "web"], "confidence": 0.85}
-Q: "Check my files and also get current weather" → {"sources": ["documents", "tool"], "confidence": 0.8}
+EXAMPLES (format only):
 
-IMPORTANT:
-- Only output valid source names from: documents, web, calculator, tool, database, direct_llm
-- If a name is not in that list, omit it (closed output space)
-- Do NOT invent new source names
-- Output exactly one JSON object, nothing else
-- If unsure, prefer ["documents"] over web
+Math:
+Q: "What is 235 * 18?" → {"sources": ["calculator"]}
+Q: "Convert 100 km to miles" → {"sources": ["calculator"]}
 
-Output your JSON now:
+Weather/Tool:
+Q: "What's the weather in Mumbai?" → {"sources": ["tool"]}
+Q: "Will it rain tomorrow?" → {"sources": ["tool"]}
+Q: "Send email to alice@example.com" → {"sources": ["tool"]}
+Q: "Post a message to #general" → {"sources": ["tool"]}
+
+Document:
+Q: "According to the paper, what is UTMOS?" → {"sources": ["documents"]}
+Q: "In Figure 4, what does the graph show?" → {"sources": ["documents"]}
+Q: "In Table 3 of the PDF, what are the results?" → {"sources": ["documents"]}
+Q: "My research paper shows what results?" → {"sources": ["documents"]}
+
+General Knowledge:
+Q: "What is the capital of France?" → {"sources": ["direct_llm"]}
+Q: "Define photosynthesis" → {"sources": ["direct_llm"]}
+
+Web/Latest:
+Q: "Latest AI benchmarks 2026" → {"sources": ["web"]}
+Q: "What's the newest research on transformers?" → {"sources": ["web"]}
+Q: "Search GitHub for pytorch implementations" → {"sources": ["web"]}
+
+Database:
+Q: "How many users signed up today?" → {"sources": ["database"]}
+Q: "What's the total revenue this month?" → {"sources": ["database"]}
+
+Multi-source:
+Q: "Compare my research with latest papers on transformers" → {"sources": ["documents", "web"]}
+Q: "Does my study match recent findings?" → {"sources": ["documents", "web"]}
+Q: "Check my files and also send a notification" → {"sources": ["documents", "tool"]}
+
+Now classify this question:
 {"""
 
 
 # =============================================================================
-# REWRITE_SYSTEM_PROMPT: Fix spelling/pronouns, keep meaning intact
+# REWRITE_SYSTEM_PROMPT
 # =============================================================================
 
 REWRITE_SYSTEM_PROMPT = """Rewrite the question as one standalone, well-formed question.
@@ -117,13 +155,8 @@ Output: "Summarize the RAG 2.0 PDF"
 
 
 # =============================================================================
-# CRITIC_PROMPT: Fact-check the answer against available evidence
+# CRITIC_PROMPT
 # =============================================================================
-#
-# 2026-08-09 FIX: Now handles multi-source evidence validation.
-# Evidence may include documents, web results, calculator results, weather,
-# tool outputs, database results, or metadata. Critic validates against
-# whatever evidence was actually available to AnswerAgent.
 
 CRITIC_PROMPT = """Judge this answer. Output only JSON.
 
@@ -183,17 +216,8 @@ Start with {{"""
 
 
 # =============================================================================
-# ANSWER_PROMPT: Generate answer using only source facts
+# ANSWER_PROMPT
 # =============================================================================
-#
-# 2026-08-06 FIX #1: SIMPLIFIED FOR 7B QWEN
-# - Removed overly complex multi-step rules (7B struggles with these)
-# - Keeps essential instruction on table-row matching
-# - Reduces token overhead (~100 tokens vs ~250)
-# - Maintains grounding without confusing the LLM
-#
-# Works with Fix #2 (grounding) + Fix #3 (retrieval filter)
-# The system-level fixes do most of the work; prompt is just guidance.
 
 ANSWER_PROMPT = """Rules:
 - If the question asks for ONE fact (a number, date, name, status, winner, result) -> answer in ONE short sentence. Do not add related facts, records, history, or trivia, even if present in the sources.
@@ -216,6 +240,21 @@ Sources:
 Question: {question}
 
 Answer:"""
+
+
+# =============================================================================
+# DIRECT_LLM_PROMPT
+# =============================================================================
+# 2026-08-10 FIX (Test 5): Prompt for questions routed to direct_llm source.
+# These are general knowledge/conceptual questions that don't require
+# document retrieval or tool execution. The LLM should answer from its
+# own training knowledge without the constraint of "only what's in sources".
+
+DIRECT_LLM_PROMPT = """Answer this question using your own knowledge. You do not have access to any documents or external sources — answer from what you know.
+
+Question: {question}
+
+Answer concisely and directly. If you're uncertain, say so rather than guessing."""
 
 
 # =============================================================================
