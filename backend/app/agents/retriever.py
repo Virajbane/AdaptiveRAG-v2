@@ -146,6 +146,20 @@ def _is_table_row_chunk(doc: dict) -> bool:
     return bool(_TABLE_ROW_PATTERN.match(doc.get("text", "")))
 
 
+# 2026-08-10 FIX (Test 8 — Figure grounding): Extend the row-chunk survival
+# guarantee to figure chunks. Tables are extracted as "Row [Entity]: Field=value..."
+# and figures are extracted as "[Section: ...]\nFigure: ...\n<description>".
+# Both are structured data that the reranker (trained on prose) underrates
+# compared to prose mentions. The fix for tables (2026-07-14) guaranteed row
+# chunks survive metric-query narrowing. Figures need the same guarantee.
+_FIGURE_CHUNK_PATTERN = re.compile(r"^\s*Figure:", re.MULTILINE)
+
+
+def _is_figure_chunk(doc: dict) -> bool:
+    """True if this chunk is a figure/image with extracted description."""
+    return bool(_FIGURE_CHUNK_PATTERN.search(doc.get("text", "")))
+
+
 # --- Range/trend annotation for numeric value extraction ---------------
 _RANGE_RE = re.compile(
     r'(?:from|rising from|surging from|grew from|increas\w* from)\s+'
@@ -192,7 +206,7 @@ class RetrieverAgent(BaseAgent):
     - Retrieves top documents using configurable candidate-K expansion
       for metric-style questions (wide search → narrow final context)
     - Executes reranking to refine candidate ranking
-    - Applies entity-aware table-row protection for benchmark metrics
+    - Applies entity-aware table-row and figure protection for benchmark metrics
     - Attaches source filenames for display in answer/sources card
     - Annotates numeric ranges so AnswerAgent can read endpoint values
 
@@ -280,11 +294,11 @@ class RetrieverAgent(BaseAgent):
             # ordinary prose questions candidate_k == FINAL_CONTEXT_SIZE
             # already, so this is a no-op slice.
             #
-            # For metric-style questions: table-row chunks are guaranteed
-            # a spot regardless of rerank score (confirmed via diagnostic
-            # that the reranker underrates table-row format even when it's
-            # the one chunk with the actual answer). Remaining slots are
-            # filled by rerank score as before.
+            # For metric-style questions: table-row AND figure chunks are
+            # guaranteed a spot regardless of rerank score (confirmed via
+            # diagnostic that the reranker underrates both structured formats
+            # even when they're the chunks with the actual answer). Remaining
+            # slots are filled by rerank score as before.
             #
             # 2026-08-06 FIX #3 follow-up: the guarantee is now scoped to
             # row chunks whose entity is actually named in the question
@@ -292,9 +306,16 @@ class RetrieverAgent(BaseAgent):
             # could be identified in the question at all). This stops the
             # cross-entity mix-up (e.g., "What is Moshi's UTMOS?" must not
             # return Lychee-FD's value).
+            #
+            # 2026-08-10 FIX: Extended this guarantee to figure chunks as
+            # well, using the same entity-matching logic.
             if is_metric_query and len(candidates) > FINAL_CONTEXT_SIZE:
                 is_comparison = _is_comparison_query(question)
+                
+                # Gather both table rows AND figures for the survival guarantee
                 all_row_chunks = [c for c in candidates if _is_table_row_chunk(c)]
+                all_figure_chunks = [c for c in candidates if _is_figure_chunk(c)]
+                all_structured_chunks = all_row_chunks + all_figure_chunks
 
                 entities_matched = {
                     _row_entity(c) for c in all_row_chunks
@@ -303,10 +324,11 @@ class RetrieverAgent(BaseAgent):
 
                 if is_comparison or not entities_matched:
                     # Can't (or shouldn't) narrow by entity -- keep old
-                    # behavior: guarantee every row chunk that survived
-                    # retrieval, regardless of entity.
-                    row_chunks = all_row_chunks
+                    # behavior: guarantee every row and figure chunk that
+                    # survived retrieval, regardless of entity.
+                    structured_chunks = all_structured_chunks
                 else:
+                    # Only keep row chunks for matched entities
                     row_chunks = [
                         c for c in all_row_chunks
                         if _row_entity(c) in entities_matched
@@ -318,13 +340,15 @@ class RetrieverAgent(BaseAgent):
                             f"entities not asked about (question refers to "
                             f"{sorted(entities_matched)})"
                         )
+                    # Keep all figure chunks (no entity info in figures, can't filter)
+                    structured_chunks = row_chunks + all_figure_chunks
 
                 other_chunks = sorted(
-                    (c for c in candidates if not _is_table_row_chunk(c)),
+                    (c for c in candidates if not (_is_table_row_chunk(c) or _is_figure_chunk(c))),
                     key=_rerank_key, reverse=True,
                 )
-                remaining_slots = max(FINAL_CONTEXT_SIZE - len(row_chunks), 0)
-                results = row_chunks + other_chunks[:remaining_slots]
+                remaining_slots = max(FINAL_CONTEXT_SIZE - len(structured_chunks), 0)
+                results = structured_chunks + other_chunks[:remaining_slots]
                 results = sorted(results, key=_rerank_key, reverse=True)
             else:
                 results = candidates
