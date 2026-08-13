@@ -153,10 +153,16 @@ def _extract_entities_from_question(question: str) -> set:
     }
 
 
-def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
+def _numeric_claims_grounded(answer: str, context: str, question: str, sources: list[str] = None) -> bool:
     """
-    Verify that numbers in the answer are grounded in the context and
-    attributed to the correct entity/field.
+    Verify that numbers in the answer are grounded in the context.
+    
+    STAGE 14 FIX: SOURCE-AWARE grounding.
+    
+    Different sources have different validation requirements:
+    - calculator / weather / tool / database: DETERMINISTIC (no grounding required)
+    - direct_llm: GENERAL KNOWLEDGE (no grounding required)
+    - documents / web: RETRIEVAL-BASED (full grounding required)
 
     2026-08-06 fix (entity-attribution cascade):
     - Extract entities from ACTUAL ROW LABELS in context, not from question
@@ -173,10 +179,27 @@ def _numeric_claims_grounded(answer: str, context: str, question: str) -> bool:
     by requiring an answer's cited number to appear in a span that ALSO
     contains the queried entity's row label.
 
+    Args:
+        answer: The generated answer text
+        context: The context provided to the LLM
+        question: The original user question
+        sources: List of sources used (from state.sources_needed)
+
     Returns:
         True if all numbers in the answer are properly grounded and attributed
         False if any number is missing from context or attributed to wrong entity/field
     """
+    sources = sources or []
+    
+    # ── STAGE 14 FIX: Deterministic sources don't require grounding ─────
+    # If the source is deterministic/authoritative, trust the answer as-is.
+    # Examples:
+    #   - calculator: 355 is correct by construction (480 - 125 = 355)
+    #   - weather: 22.28°C is correct from the weather API
+    #   - database: results are correct from the database query
+    #   - direct_llm: general knowledge doesn't need document evidence
+    if sources and sources[0] in ("calculator", "weather", "tool", "database", "direct_llm"):
+        return True
     numbers_in_answer = _NUM_RE.findall(answer)
     if not numbers_in_answer:
         return True
@@ -485,8 +508,9 @@ class AnswerAgent(BaseAgent):
             state.answer = response.strip()
 
             # 2026-08-06 fix: Grounding verification with row/entity protection
+            # STAGE 14 FIX: Pass sources so grounding is source-aware
             declined_on_ungrounded_number = not _numeric_claims_grounded(
-                state.answer, context, state.question
+                state.answer, context, state.question, state.sources_needed
             )
             if declined_on_ungrounded_number:
                 print(

@@ -1,19 +1,15 @@
 """
 Natural-language arithmetic: intent detection + expression construction.
 
-Root cause this module fixes (CALC_04 / planner eval failure 1):
-  The planner's old _CALCULATOR_INTENT regex only recognized arithmetic
-  written with symbols ("250 - 37") or an explicit "calculate/compute/
-  solve" verb next to a digit. A question like "If I have 250 items and
-  remove 37, how many remain?" expresses subtraction entirely in words,
-  so it matched nothing and fell through to the documents default.
-
-Design: arithmetic *intent* is "an arithmetic verb/phrase co-occurring
-with at least two numbers", independent of any specific sentence. This
-module is intentionally generic -- it is keyed on operation vocabulary,
-not on any single example question -- so it generalizes to phrasings
-never seen during this fix (per the eval instructions: no hardcoded
-example sentences).
+STAGE 14 FIX (2026-08-14):
+  Complete rewrite to support:
+  - N-operand expressions (not just 2)
+  - Percentage syntax ("18% of 3500" → "3500 * 18 / 100")
+  - Chained operations ("divide 1440 by 24 and add 35" → "1440 / 24 + 35")
+  - Averaging all operands ("average of 18, 24, 30, 36" → "(18+24+30+36)/4")
+  
+  Design principle: intent detection remains generic (no hardcoded sentences),
+  but expression building now handles the full range of NL arithmetic patterns.
 
 Both the planner (needs a yes/no signal) and the tool agent (needs an
 actual expression string to evaluate) share the same vocabulary here so
@@ -57,6 +53,13 @@ _REVERSED_SUBTRACT = re.compile(
     re.IGNORECASE,
 )
 
+# Percentage syntax: "18% of 3500" or "18 percent of 3500"
+_PERCENTAGE_OF = re.compile(
+    r"(\d+(?:\.\d+)?)\s*%\s+of\s+(\d+(?:\.\d+)?)|"
+    r"(\d+(?:\.\d+)?)\s+percent\s+of\s+(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
 # Any arithmetic-operation vocabulary at all -- used as the coarse
 # "does this question even smell like arithmetic" gate before we bother
 # counting numbers.
@@ -94,37 +97,135 @@ def has_nl_arithmetic_intent(question: str) -> bool:
 def build_expression(question: str) -> Optional[str]:
     """
     Build a safe arithmetic expression string from a natural-language
-    arithmetic question, e.g. "I have 250 items and remove 37" -> "250 - 37".
+    arithmetic question.
+    
+    Examples:
+    - "I have 250 items and remove 37" → "250 - 37"
+    - "average of 18, 24, 30, 36" → "(18+24+30+36)/4"
+    - "18% of 3500" → "3500 * 18 / 100"
+    - "divide 1440 by 24 and add 35" → "1440 / 24 + 35"
 
     Returns None if no confident expression can be built (caller should
     fall back to its existing symbol-based extraction / error handling).
     """
-    # Reversed subtraction: "removing Y from X" -> "X - Y"
+    
+    # ── PERCENTAGE: "18% of 3500" or "18 percent of 3500" ─────────────
+    pct_match = _PERCENTAGE_OF.search(question)
+    if pct_match:
+        # Groups: (percent, base) or (None, None, percent, base)
+        percent = pct_match.group(1) or pct_match.group(3)
+        base = pct_match.group(2) or pct_match.group(4)
+        if percent and base:
+            return f"{base} * {percent} / 100"
+    
+    # ── REVERSED SUBTRACTION: "remove Y from X" → "X - Y" ─────────────
     m = _REVERSED_SUBTRACT.search(question)
     if m:
         subtrahend, base = m.group(1), m.group(2)
         return f"{base} - {subtrahend}"
-
+    
+    # ── AVERAGE: "average of 1, 2, 3, 4" → "(1+2+3+4)/4" ──────────────
     if _AVERAGE_WORDS.search(question):
         numbers = _NUMBER.findall(question)
         if len(numbers) >= 2:
             return f"({'+'.join(numbers)})/{len(numbers)}"
         return None
-
+    
+    # ── CHAINED OPERATIONS: "divide X by Y and add Z" ──────────────────
+    # Strategy: if multiple operation words are present, chain them
+    chained = _try_build_chained_expression(question)
+    if chained:
+        return chained
+    
+    # ── SINGLE OPERATION (fallback) ──────────────────────────────────────
+    # Use all available numbers with the detected operation
     numbers = _NUMBER.findall(question)
     if len(numbers) < 2:
         return None
-    a, b = numbers[0], numbers[1]
-
-    # Priority mirrors _deterministic_calculator_routing's reasoning:
-    # an explicit subtraction word is the strongest, least ambiguous
-    # signal (e.g. "buy 20 and spend 7" -- "spend" wins over "buy").
+    
+    # Priority: explicit operation verb determines which to use
     if _SUBTRACT_WORDS.search(question):
-        return f"{a} - {b}"
+        # For subtraction with multiple numbers, use: a - b - c - ...
+        # But for 2 numbers, just "a - b"
+        if len(numbers) == 2:
+            return f"{numbers[0]} - {numbers[1]}"
+        else:
+            # For multiple subtractions, chain them left-to-right
+            return _build_expression_with_operator(numbers, "-")
+    
     if _MULTIPLY_WORDS.search(question):
-        return f"{a} * {b}"
+        # Multiplication: a * b * c
+        return _build_expression_with_operator(numbers, "*")
+    
     if _DIVIDE_WORDS.search(question):
-        return f"{a} / {b}"
+        # Division: a / b / c (evaluated left-to-right)
+        return _build_expression_with_operator(numbers, "/")
+    
     if _ADD_WORDS.search(question):
-        return f"{a} + {b}"
+        # Addition: a + b + c
+        return _build_expression_with_operator(numbers, "+")
+    
+    return None
+
+
+def _build_expression_with_operator(numbers: list[str], op: str) -> str:
+    """
+    Build expression with N operands and the same operator.
+    E.g., [10, 20, 30] + "+" → "10 + 20 + 30"
+    """
+    if len(numbers) == 1:
+        return numbers[0]
+    return f" {op} ".join(numbers)
+
+
+def _try_build_chained_expression(question: str) -> Optional[str]:
+    """
+    Handle chained operations like "divide 1440 by 24 and add 35".
+    
+    Strategy:
+    1. Find all numbers in order: [1440, 24, 35]
+    2. Find all operation words in order: [divide, add]
+    3. Chain them: "1440 / 24 + 35"
+    
+    Returns None if pattern doesn't match (caller tries single operation).
+    """
+    numbers = _NUMBER.findall(question)
+    if len(numbers) < 3:
+        # Chained ops need at least 3 operands
+        return None
+    
+    # Find all operations mentioned, in order
+    # (this is heuristic: assumes operations appear roughly in numeric order)
+    operations = []
+    
+    q_lower = question.lower()
+    # Mark positions of each operation in the question string
+    op_positions = []
+    
+    for match in _DIVIDE_WORDS.finditer(q_lower):
+        op_positions.append((match.start(), "/"))
+    for match in _MULTIPLY_WORDS.finditer(q_lower):
+        op_positions.append((match.start(), "*"))
+    for match in _SUBTRACT_WORDS.finditer(q_lower):
+        op_positions.append((match.start(), "-"))
+    for match in _ADD_WORDS.finditer(q_lower):
+        op_positions.append((match.start(), "+"))
+    
+    # Sort by position in the question (appears left-to-right)
+    op_positions.sort()
+    operations = [op for _, op in op_positions]
+    
+    # If we have fewer operations than needed (n-1 operations for n numbers),
+    # fall back to single operation detection
+    if len(operations) < len(numbers) - 1:
+        return None
+    
+    # Build the expression: number1 op1 number2 op2 number3 ...
+    if len(operations) >= len(numbers) - 1:
+        # Take only the first n-1 operations (for n numbers)
+        expr = str(numbers[0])
+        for i, op in enumerate(operations[:len(numbers)-1]):
+            expr += f" {op} {numbers[i+1]}"
+        return expr
+    
     return None

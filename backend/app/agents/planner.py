@@ -351,6 +351,19 @@ _BARE_WHAT_IS = re.compile(
 )
 _HAS_DIGIT = re.compile(r"\d")
 
+# Current/live/real-time information intent (STAGE 14 FIX):
+# Signals that the user wants up-to-date data, not stale general knowledge.
+# This catches "current price of Bitcoin" (web) vs "What is Bitcoin?" (direct_llm).
+_CURRENT_LIVE_INTENT = re.compile(
+    r"\b(?:"
+    r"current|now|today|tonight|right\s+now|this\s+moment|"
+    r"live|real.?time|latest|up.?to.?date|recent|breaking|"
+    r"just\s+(?:now|happened|released)|update|fresh|latest|"
+    r"what's\s+happening|ongoing|active"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Database intent: internal app data queries (moved to deterministic layer for 0.5B)
 _DATABASE_INTENT = re.compile(
     r"(?:"
@@ -954,6 +967,27 @@ class PlannerAgent(BaseAgent):
             return ["web"]
         return None
 
+    def _deterministic_current_live_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 14: Detect current/live/real-time information intent.
+        
+        Runs AFTER web/weather but BEFORE bare "what is" explanation.
+        This catches "current price of Bitcoin" → web (live data)
+        vs "What is Bitcoin?" → direct_llm (general knowledge).
+        
+        The key signal: "current", "now", "today", "live", "real-time"
+        strongly indicate the user wants up-to-date information, not
+        a definition or historical explanation.
+        
+        If detected, returns ["web"] (high confidence 0.85).
+        If not detected, returns None (continue routing).
+        """
+        if _CURRENT_LIVE_INTENT.search(question):
+            print(f"[PLANNER] Current/live-information intent detected: "
+                  f"{question[:70]}...")
+            return ["web"]
+        return None
+    
     def _deterministic_explanation_routing(self, question: str) -> list[str] | None:
         """
         STAGE 13: High-confidence GENERAL EXPLANATION INTENT detection.
@@ -1038,6 +1072,12 @@ class PlannerAgent(BaseAgent):
         deterministic = self._deterministic_web_routing(question_to_classify)
         if deterministic is not None:
             return self._apply_placeholder_check(state, deterministic, 0.9)
+
+        # Current/live/real-time information (AFTER web, BEFORE explanation)
+        # This catches "current price" vs "what is" general knowledge distinction
+        deterministic = self._deterministic_current_live_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.85)
 
         # General explanation-intent (AFTER every operational pattern)
         deterministic = self._deterministic_explanation_routing(question_to_classify)

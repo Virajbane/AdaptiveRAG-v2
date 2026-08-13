@@ -287,6 +287,58 @@ class CriticAgent(BaseAgent):
             )
             return state
 
+        # ── STAGE 14 FIX: SOURCE-AWARE VALIDATION ────────────────────────
+        # Different sources have different validation requirements.
+        # Deterministic/authoritative sources validate on tool success.
+        # General knowledge validates on non-empty answer.
+        # Retrieval-based validates on evidence grounding.
+        sources = state.sources_needed or []
+        
+        if sources and sources[0] in ("calculator", "weather", "tool", "database"):
+            # Deterministic tool sources: answer is valid iff tool succeeded
+            tool_name = {
+                "calculator": "calculator",
+                "weather": "weather",
+                "tool": "tool",
+                "database": "database",
+            }.get(sources[0])
+            
+            tool_result = state.tool_results.get(tool_name) if state.tool_results else None
+            if tool_result and not tool_result.get("error"):
+                # Tool succeeded; answer is valid
+                state.is_valid = True
+                state.failure_type = ""
+                state.critic_confidence = 0.95
+                state.validation_issues = []
+                print(f"[CRITIC] Deterministic tool succeeded ({tool_name}): is_valid=True, confidence=0.95")
+                
+                # Set confidence_final early (no LLM call needed)
+                state.confidence_final = 0.95
+                state.last_answer_hash = _compute_hash(state.answer)
+                return state
+            else:
+                # Tool failed; answer is invalid
+                state.is_valid = False
+                state.failure_type = "tool"
+                state.critic_confidence = 0.0
+                state.validation_issues = ["Tool execution failed"]
+                state.confidence_final = 0.0
+                print(f"[CRITIC] Deterministic tool failed ({tool_name}): is_valid=False")
+                state.last_answer_hash = _compute_hash(state.answer)
+                return state
+        
+        elif sources and sources[0] == "direct_llm":
+            # Direct LLM (general knowledge): answer is valid if non-empty
+            is_non_empty = bool(state.answer and state.answer.strip())
+            state.is_valid = is_non_empty
+            state.failure_type = "generation" if not is_non_empty else ""
+            state.critic_confidence = 0.85 if is_non_empty else 0.0
+            state.validation_issues = [] if is_non_empty else ["Answer is empty"]
+            state.confidence_final = 0.85 if is_non_empty else 0.0
+            print(f"[CRITIC] Direct LLM general knowledge: is_valid={is_non_empty}, confidence=0.85")
+            state.last_answer_hash = _compute_hash(state.answer)
+            return state
+
         # 2026-08-09 FIX: Build context from ACTUAL EVIDENCE used by AnswerAgent
         evidence_context = self._build_actual_evidence_context(state)
 

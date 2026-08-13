@@ -296,6 +296,17 @@ def _format_history(history: list[dict], summaries: list[dict]) -> str:
     Builds the history block shown to the model: long-term summaries
     (older content, compressed) first, then as many recent verbatim
     turns as fit inside HISTORY_PROMPT_TOKEN_BUDGET.
+    
+    STAGE 14 FIX: Filter to USER-ONLY turns.
+    
+    Why? Assistant answers can contain entities, locations, and topic words
+    that contaminate the rewriter if the fast model conflates them with
+    the new question's context. E.g., if the previous answer mentioned
+    "Bengaluru", the rewriter might use that location in a rewrite of an
+    unrelated question. By showing only user questions (not assistant
+    answers), we preserve context resolution ("what about the weather in
+    [the city we just asked about]?") without risking contamination from
+    assistant output.
     """
     if not history and not summaries:
         return "(no prior conversation)"
@@ -311,8 +322,11 @@ def _format_history(history: list[dict], summaries: list[dict]) -> str:
 
     recent = _select_recent_history(history, HISTORY_PROMPT_TOKEN_BUDGET)
     if recent:
-        lines = [f"{t.get('role', 'user')}: {t.get('content', '')}" for t in recent]
-        parts.append("Recent conversation:\n" + "\n".join(lines))
+        # STAGE 14 FIX: Filter to user-only turns to prevent assistant answer contamination
+        user_only = [t for t in recent if t.get("role") == "user"]
+        if user_only:
+            lines = [f"Q: {t.get('content', '')}" for t in user_only]
+            parts.append("Recent questions:\n" + "\n".join(lines))
 
     return "\n\n".join(parts) if parts else "(no prior conversation)"
 

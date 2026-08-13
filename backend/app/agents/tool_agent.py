@@ -82,21 +82,52 @@ def _extract_expression(question: str) -> Optional[str]:
     """
     Extract mathematical expression from question.
 
-    STAGE 13 FIX (planner eval failure CALC_04 downstream half): the
-    planner can now route natural-language arithmetic ("250 items,
-    remove 37") to the calculator, but this function only ever looked
-    for a literal symbolic expression -- so even correctly-routed NL
-    questions would reach here, find no "+/-*/" characters, and fail
-    with "No math expression found". Symbolic extraction is tried
-    first (unchanged, preserves existing behavior for symbolic
-    questions); NL expression building via app.agents.nl_arithmetic is
-    only used as a fallback when no symbol is present.
+    Priority:
+    1. Percentage phrases: "18% of 3500" → "3500 * 18 / 100"
+    2. Symbolic expressions: "+", "-", "/", "*"
+    3. Natural language expressions via nl_arithmetic module
+
+    STAGE 13 FIX: fallback to NL expression building when no symbolic
+    expression found. STAGE 14 FIX: add percentage extraction first.
     """
     q = question.replace("×", "*").replace("÷", "/").replace("^", "**")
+    
+    # ── PERCENTAGE PHRASES (FIRST, since they contain %) ──────────────
+    pct_expr = _extract_percentage_expression(q)
+    if pct_expr:
+        return pct_expr
+    
+    # ── SYMBOLIC EXPRESSIONS ──────────────────────────────────────────
     match = _MATH_EXPR.search(q)
     if match and any(ch.isdigit() for ch in match.group(0)):
         return match.group(0).strip()
+    
+    # ── NATURAL LANGUAGE EXPRESSIONS ──────────────────────────────────
     return _build_nl_expression(question)
+
+
+def _extract_percentage_expression(q: str) -> Optional[str]:
+    """
+    Extract percentage expressions like "18% of 3500" → "3500 * 18 / 100"
+    or "18 percent of 3500" → "3500 * 18 / 100".
+    
+    Returns None if no percentage pattern found.
+    """
+    import re
+    # Match "X% of Y" or "X percent of Y"
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*%\s+of\s+(\d+(?:\.\d+)?)|"
+        r"(\d+(?:\.\d+)?)\s+percent\s+of\s+(\d+(?:\.\d+)?)",
+        q,
+        re.IGNORECASE
+    )
+    if m:
+        # Groups: (percent, base) or (None, None, percent, base)
+        pct = m.group(1) or m.group(3)
+        base = m.group(2) or m.group(4)
+        if pct and base:
+            return f"{base} * {pct} / 100"
+    return None
 
 
 def _extract_location(question: str) -> Optional[str]:
