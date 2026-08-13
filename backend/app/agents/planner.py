@@ -4,6 +4,8 @@ import re
 from app.agents.base import BaseAgent
 from app.agents.prompts import PLANNER_PROMPT
 from app.agents.state import AgentState
+from app.agents.nl_arithmetic import has_nl_arithmetic_intent
+from app.agents.tool_mapping import resolve_concrete_tool
 
 # --------------------------------------------------------------------------
 # ROUTING HISTORY (read before modifying)
@@ -112,8 +114,13 @@ _PERSONAL_CONTENT = re.compile(
 # Document-intent: comprehensive patterns for research paper/figure/table queries
 _DOCUMENT_INTENT = re.compile(
     r"(?:"
-    # Explicit document-referencing phrases
-    r"according\s+to\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|study|research|report)\b|"
+    # Explicit document-referencing phrases. Allows a possessive/topic
+    # modifier between "according to" and the document noun (e.g.
+    # "according to my RAG document") -- the original pattern required
+    # strict adjacency and missed this, the same class of bug fixed for
+    # multi-source routing in STAGE 12.
+    r"according\s+to\s+(?:the\s+|my\s+|our\s+)?(?:\w+\s+){0,2}(?:paper|document|pdf|file|abstract|publication|study|research|report)\b|"
+    r"(?:my|our)\s+uploaded\s+(?:paper|pdf|file|document|research|data)\b|"
     r"in\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|section|appendix|figure|table|table\s+of\s+contents)\b|"
     # Query about what document says/reports/shows
     r"(?:what\s+(?:is|does|did)|what's|list)\s+(?:reported|mentioned|described|stated|shown|found|demonstrated|proposed|suggested)\s+in\b|"
@@ -136,10 +143,23 @@ _DOCUMENT_INTENT = re.compile(
 )
 
 # Calculator-intent: mathematical operations, conversions, numeric computations
+#
+# v7 (2026-08-13 FIX -- planner eval failure LLM_02): the previous first
+# branch here, `(?:what\s+is|calculate|...)\s+.+(?:\+|-|\*|/|...).*[?\"]`,
+# matched a bare "-" character with no digits anywhere nearby. Since the
+# character class `(?:\+|-|\*|/|÷|×)` treats "-" as "the literal minus
+# sign", it happily matched the hyphen inside "object-oriented" --
+# "What is object-oriented programming?" satisfied "what is" + ".+" +
+# "-" + ".*?" and was misrouted to the calculator. That branch is
+# removed: `\d+\s*(?:\+|-|\*|/|÷|×)\s*\d+` below already covers every
+# symbolic-math case it was meant to catch (digit-operator-digit), and
+# additionally requires digits adjacent to the operator, so a stray
+# hyphen in an ordinary word can never match it.
 _CALCULATOR_INTENT = re.compile(
     r"(?:"
-    # Arithmetic operations
-    r"(?:what\s+is|calculate|compute|solve)\s+.+(?:\+|-|\*|/|÷|×).*[?\"]|"
+    # Arithmetic operations (operator MUST be adjacent to digits on both
+    # sides -- this is what makes it immune to stray hyphens elsewhere
+    # in the sentence, e.g. "object-oriented")
     r"\d+\s*(?:\+|-|\*|/|÷|×)\s*\d+|"
     # Explicit calculator keywords
     r"(?:what's?|calculate|compute|solve|find|simplify)\s+.+[0-9].+[?\"]|"
@@ -161,14 +181,62 @@ _CALCULATOR_INTENT = re.compile(
 
 # Weather and action-intent: explicit external utility requests
 # HIGH PRIORITY: Put this BEFORE web to prevent weather→web confusion
+#
+# v2 (2026-08-13 FIX -- planner eval failure AMB_03): the bare
+# "(?:what's?|what\s+is)\s+(?:the\s+)?(?:weather|...)\b" branch matched
+# on the weather NOUN alone, with nothing checked about what came after
+# it -- so "What is the weather concept?" and "What is the weather in
+# Mumbai?" were indistinguishable to this pattern. Weather-noun
+# *mention* is not the same as a request for live weather DATA.
+# Live-data intent requires the weather noun to be paired with either
+# (a) a location, (b) a temporal/immediacy marker (today, right now,
+# ...), or (c) an explicit action phrasing ("will it rain"). Mentioning
+# the term with no such pairing (a bare noun, or paired with an
+# explanation word like "concept"/"mean"/"definition") is conceptual,
+# not operational, and is deliberately left unmatched here so it falls
+# through to the explanation-intent layer instead.
+_WEATHER_TERM = re.compile(
+    r"\b(?:weather|temperature|temp|forecast|precipitation|rain|snow|wind|humidity|climate|conditions?)\b",
+    re.IGNORECASE,
+)
+_WEATHER_EXPLANATION_MARKER = re.compile(
+    r"\b(?:concept|mean|means|meaning|definition|works?|explain|"
+    r"forecasting|prediction|technology|science|how\s+does|how\s+do)\b",
+    re.IGNORECASE,
+)
+_WEATHER_LIVE_SIGNAL = re.compile(
+    r"\b(?:in|at|for|near)\s+[A-Za-z][A-Za-z\s\-]{1,40}|"
+    r"\b(?:today|tomorrow|tonight|this\s+week|this\s+weekend|right\s+now|currently|current|now)\b",
+    re.IGNORECASE,
+)
+_WEATHER_ACTION_VERB = re.compile(
+    r"(?:is\s+it|will\s+it)\s+(?:rain|snow|be\s+sunny|be\s+cloudy|be\s+cold|be\s+hot|be\s+warm)|"
+    r"(?:will|is)\s+(?:there|it)\s+(?:be\s+rain|be\s+snow|rain|snow)",
+    re.IGNORECASE,
+)
+
+
+def _is_weather_live_query(question: str) -> bool:
+    """
+    True only for an OPERATIONAL weather request (live data wanted),
+    never for a mention of the concept of weather. See v2 note above.
+    """
+    if not _WEATHER_TERM.search(question):
+        return False
+    if _WEATHER_ACTION_VERB.search(question):
+        return True
+    if _WEATHER_EXPLANATION_MARKER.search(question):
+        # An explanation word is present alongside the weather term
+        # ("concept", "how does ... work", "forecasting" as a topic,
+        # etc.) -- treat as conceptual unless there's ALSO an
+        # unambiguous location/temporal signal (e.g. "how's the
+        # weather in Mumbai right now" still wants live data).
+        return bool(_WEATHER_LIVE_SIGNAL.search(question))
+    return bool(_WEATHER_LIVE_SIGNAL.search(question))
+
+
 _WEATHER_ACTION_INTENT = re.compile(
     r"(?:"
-    # Weather queries (many variants to catch 0.5B confusion)
-    r"(?:what's?|what\s+is)\s+(?:the\s+)?(?:weather|temperature|temp|forecast|precipitation|rain|snow|wind|humidity|climate|conditions?)\b|"
-    r"weather\s+(?:in|at|for|today|tomorrow).*[?\"]|"
-    r"(?:is\s+it|will\s+it)\s+(?:rain|snow|be\s+sunny|be\s+cloudy|be\s+cold|be\s+hot|be\s+warm).*[?\"]|"
-    r"(?:will|is)\s+(?:there|it)\s+(?:be\s+rain|be\s+snow|rain|snow).*[?\"]|"
-    r"(?:what\s+(?:is|'s)\s+the\s+)?(?:temperature|temp|weather|forecast).*(?:in|at|for|today|tomorrow|next|week).*[?\"]|"
     # Action requests (send, post, email, message, etc.)
     r"(?:send|post|message|email|notify|alert|slack|dm|dm\s+me|share)\s+(?:.+\s+)?(?:to|on|in|via)\b|"
     r"(?:post|send|message|email|write|compose|create)\s+.+(?:to|into|on)\s+.*[?\"]|"
@@ -217,18 +285,71 @@ _MULTI_SOURCE_EXTERNAL_REF = re.compile(
 _WEB_INTENT = re.compile(
     r"(?:"
     # Temporal keywords indicating recency
-    r"(?:latest|current|recent|newest|breaking|today|this\s+week|this\s+month|2024|2025|2026)\b.*(?:news|developments?|events?|results?|updates?|benchmarks?|papers?|research|findings?)|"
+    r"(?:latest|current|recent|newest|breaking|today|this\s+week|this\s+month|2024|2025|2026)\b.*(?:news|developments?|events?|results?|updates?|benchmarks?|papers?|research|findings?|techniques?|methods?|approaches?|advances?|trends?|tools?|models?)|"
     r"what's?\s+(?:new|happening|going\s+on|the\s+latest|trending)\b|"
-    r"(?:what|what's|find|search)\s+(?:the\s+)?(?:latest|current|recent)\s+(?:news|developments?|events?|updates?|benchmarks?|papers?|research|findings?)\b|"
+    r"(?:what|what's|find|search)\s+(?:the\s+)?(?:latest|current|recent)\s+(?:news|developments?|events?|updates?|benchmarks?|papers?|research|findings?|techniques?|methods?|approaches?|advances?|trends?|tools?|models?)\b|"
     # GitHub/public repository search
     r"(?:github|gitlab|bitbucket|repository|repo|source\s+code)\s+.*(?:search|find|look\s+for|show)\b|"
     r"(?:search|find|show|look\s+for)\s+.*(?:on\s+github|repository|repo|on\s+(?:github|gitlab|bitbucket))\b|"
     # External/public information requiring search
     r"(?:search\s+(?:for|online)?|find|look\s+up|research)\s+.+(?:on\s+(?:the\s+)?(?:internet|web|online)|publicly|external)\b|"
-    r"what\s+is\s+.+on\s+(?:the\s+)?(?:internet|web|online).*[?\"]"
+    r"what\s+is\s+.+on\s+(?:the\s+)?(?:internet|web|online).*[?\"]|"
+    # "what happened ... <recency marker>" -- current/recent events, as
+    # opposed to "what happened ... historically" (see _HISTORICAL_INTENT)
+    r"what(?:'s|\s+is|\s+happened|\s+are\s+the\s+latest\s+developments?)\b.*\b(?:today|yesterday|this\s+week|this\s+month|recently|lately)\b"
     r")",
     re.IGNORECASE
 )
+
+# =============================================================================
+# STAGE 13 FIX (2026-08-13): EXPLANATION-INTENT LAYER
+#
+# Root cause shared by planner eval failures LLM_02 (residual), AMB_03
+# (residual), AMB_04, AMB_05, AMB_07: none of documents/database/
+# calculator/weather/web deterministic layers match these questions, so
+# they all fell through to LLM classification -- which, per this
+# project's own comments elsewhere (v3, "documents-bias instruction"),
+# is unreliable on a small model and biased toward "documents" on
+# uncertainty. The fix is not "make the LLM better" but "recognize this
+# whole class of question deterministically", per the doc's recommended
+# intent model (GENERAL EXPLANATION INTENT as its own category, checked
+# before ever reaching the LLM).
+#
+# This is a MENTION-OF vs REQUEST-FOR distinction: "explain X", "how
+# does X work", "what is X" (bare concept, no digits/location/document/
+# recency signal), "history of X" / "X historically" are all requests
+# for an explanation, not a request to fetch/compute/retrieve anything.
+# =============================================================================
+
+# Explicit "please explain this concept" phrasing.
+_EXPLANATION_MARKER = re.compile(
+    r"^\s*explain\b|"
+    r"\bhow\s+(?:does|do)\s+.+\s+work\b|"
+    r"\bwhat\s+(?:does|is)\s+.+\s+mean\b|"
+    r"\b(?:definition|meaning)\s+of\b|"
+    r"\bwhat\s+is\s+the\s+\w+\s+concept\b",
+    re.IGNORECASE,
+)
+
+# General knowledge / historical framing, as opposed to a request for
+# current/recent information (which _WEB_INTENT already catches first).
+_HISTORICAL_INTENT = re.compile(
+    r"\bhistorically\b|\bhistory\s+of\b|\bhistorical(?:ly)?\b|"
+    r"\bwhen\s+was\s+.+\s+(?:founded|established|built|invented|created)\b|"
+    r"\borigin(?:s|ated)?\s+of\b",
+    re.IGNORECASE,
+)
+
+# Bare "what is X?" / "what's X?" / "what are X?" with no digits, no
+# location preposition, and no other operational signal -- a plain
+# request for a definition/explanation. Deliberately simple: this is
+# the same shape as rule 7 in PLANNER_PROMPT ("General Knowledge"), just
+# enforced deterministically instead of hoping the LLM applies it.
+_BARE_WHAT_IS = re.compile(
+    r"^\s*what(?:'s|\s+is|\s+are)\s+(?:a\s+|an\s+|the\s+)?[a-z][\w\s\-]*\??\s*$",
+    re.IGNORECASE,
+)
+_HAS_DIGIT = re.compile(r"\d")
 
 # Database intent: internal app data queries (moved to deterministic layer for 0.5B)
 _DATABASE_INTENT = re.compile(
@@ -492,10 +613,27 @@ def _keyword_fallback_classification(question: str) -> list[str]:
         database signal at all.
     """
     q_lower = question.lower()
-    
+
+    # STAGE 13 FIX: historical/explanation questions are checked FIRST
+    # in the fallback too, for the same reason as the deterministic
+    # layer -- otherwise a plain substring match below (e.g. "forecast"
+    # inside "forecasting") would misroute an explanation question
+    # before ever reaching a real check.
+    if _HISTORICAL_INTENT.search(question) or _EXPLANATION_MARKER.search(question):
+        print("[PLANNER] Keyword fallback: detected explanation/historical intent → direct_llm")
+        return ["direct_llm"]
+
     # Weather/Tool keywords (HIGHEST PRIORITY to avoid weather→web confusion)
-    weather_keywords = ["weather", "temperature", "temp", "forecast", "rain", "snow", "will it"]
-    if any(kw in q_lower for kw in weather_keywords):
+    # STAGE 13 FIX: uses word-boundary regex, not plain substring
+    # containment -- "forecast" as a bare Python `in` check matched
+    # inside "forecasting", "temp" matched inside "attempt", etc.
+    weather_keyword_re = re.compile(
+        r"\b(?:weather|temperature|temp|forecast|rain|snow)\b|\bwill\s+it\b",
+        re.IGNORECASE,
+    )
+    if _is_weather_live_query(question) or (
+        weather_keyword_re.search(question) and not _WEATHER_EXPLANATION_MARKER.search(question)
+    ):
         print("[PLANNER] Keyword fallback: detected weather intent → tool")
         return ["tool"]
     
@@ -519,7 +657,11 @@ def _keyword_fallback_classification(question: str) -> list[str]:
     has_math_symbol_with_digit = bool(
         re.search(r"\d\s*[+\-*/]\s*\d", question) or re.search(r"[+\-*/]\s*\d", question)
     )
-    if any(kw in q_lower for kw in calc_keywords) or has_math_symbol_with_digit:
+    if (
+        any(kw in q_lower for kw in calc_keywords)
+        or has_math_symbol_with_digit
+        or has_nl_arithmetic_intent(question)
+    ):
         print("[PLANNER] Keyword fallback: detected calculator intent → calculator")
         return ["calculator"]
     
@@ -665,6 +807,7 @@ class PlannerAgent(BaseAgent):
             print(f"[PLANNER] Routed source(s) {placeholder_hits!r} "
                   f"not yet implemented")
             state.sources_needed = placeholder_hits
+            state.tool = None
             state.metadata_answer = {
                 "placeholder": f"{placeholder_hits[0]} integration is under development."
             }
@@ -672,6 +815,12 @@ class PlannerAgent(BaseAgent):
             return state
 
         state.sources_needed = sources
+        # STAGE 13 FIX (AMB_09 / "tool selection accuracy = 0%"): every
+        # exit point that sets sources_needed also resolves and sets the
+        # concrete tool name, via the single shared resolver in
+        # app.agents.tool_mapping -- see that module for why this field
+        # didn't exist before.
+        state.tool = resolve_concrete_tool(sources, state.rewritten_question or state.question)
         state.confidence = confidence
         return state
 
@@ -743,14 +892,26 @@ class PlannerAgent(BaseAgent):
     def _deterministic_calculator_routing(self, question: str) -> list[str] | None:
         """
         STAGE 11: High-confidence calculator-intent detection.
+        STAGE 13 (2026-08-13, planner eval failure CALC_04): added
+        natural-language arithmetic detection (app.agents.nl_arithmetic)
+        as a second, independent check -- symbolic patterns
+        ("250 - 37", "calculate 25 * 40") and verbal arithmetic ("250
+        items, remove 37", "average of 10, 20 and 30") are genuinely
+        different signals, so they're checked separately rather than
+        forcing one regex to do both jobs.
         
         If detected, returns ["calculator"] (high confidence 0.95).
         If not detected, returns None (LLM will decide).
         
-        Covers: arithmetic, percentages, unit conversions, powers, roots.
+        Covers: arithmetic, percentages, unit conversions, powers, roots,
+        and natural-language arithmetic phrasing.
         """
         if _CALCULATOR_INTENT.search(question):
             print(f"[PLANNER] Calculator-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["calculator"]
+        if has_nl_arithmetic_intent(question):
+            print(f"[PLANNER] NL-arithmetic-intent detected: "
                   f"{question[:70]}...")
             return ["calculator"]
         return None
@@ -766,8 +927,12 @@ class PlannerAgent(BaseAgent):
         Covers: weather queries, send/post/email/Slack actions, 
         calendar/reminder creation.
         """
+        if _is_weather_live_query(question):
+            print(f"[PLANNER] Weather-live-query detected: "
+                  f"{question[:70]}...")
+            return ["tool"]
         if _WEATHER_ACTION_INTENT.search(question):
-            print(f"[PLANNER] Weather/action-intent pattern detected: "
+            print(f"[PLANNER] Action-intent pattern detected: "
                   f"{question[:70]}...")
             return ["tool"]
         return None
@@ -787,6 +952,36 @@ class PlannerAgent(BaseAgent):
             print(f"[PLANNER] Web-intent pattern detected: "
                   f"{question[:70]}...")
             return ["web"]
+        return None
+
+    def _deterministic_explanation_routing(self, question: str) -> list[str] | None:
+        """
+        STAGE 13: High-confidence GENERAL EXPLANATION INTENT detection.
+
+        Runs LAST among the deterministic layers (after document/
+        database/calculator/weather/web have all had a chance to claim
+        the question), which is what keeps it safe: by construction,
+        anything reaching this point has already been checked against
+        every more-specific operational pattern and matched none of
+        them, so a request to *explain* a topic can't be confused with
+        a request to *fetch/compute* something -- it's a distinct
+        category, not merely "in case the earlier layers missed it".
+
+        If detected, returns ["direct_llm"] (high confidence 0.9).
+        If not detected, returns None (LLM will decide).
+        """
+        if _HISTORICAL_INTENT.search(question):
+            print(f"[PLANNER] Historical-knowledge-intent detected: "
+                  f"{question[:70]}...")
+            return ["direct_llm"]
+        if _EXPLANATION_MARKER.search(question):
+            print(f"[PLANNER] Explanation-intent pattern detected: "
+                  f"{question[:70]}...")
+            return ["direct_llm"]
+        if not _HAS_DIGIT.search(question) and _BARE_WHAT_IS.match(question.strip()):
+            print(f"[PLANNER] Bare general-knowledge question detected: "
+                  f"{question[:70]}...")
+            return ["direct_llm"]
         return None
 
     async def _execute(self, state: AgentState) -> AgentState:
@@ -844,6 +1039,11 @@ class PlannerAgent(BaseAgent):
         if deterministic is not None:
             return self._apply_placeholder_check(state, deterministic, 0.9)
 
+        # General explanation-intent (AFTER every operational pattern)
+        deterministic = self._deterministic_explanation_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.9)
+
         # ---- Layer 3: LLM classification (for remaining ambiguous cases) ----
         sources = await self._classify_sources(question_to_classify)
 
@@ -856,6 +1056,7 @@ class PlannerAgent(BaseAgent):
             # Final fallback: assume documents query
             print("[PLANNER] All routing failed, defaulting to documents")
             state.sources_needed = ["documents"]
+            state.tool = resolve_concrete_tool(["documents"], question_to_classify)
             state.confidence = 0.5
             return state
 

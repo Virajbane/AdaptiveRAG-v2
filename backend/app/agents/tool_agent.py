@@ -50,6 +50,8 @@ from typing import Optional, Dict, Any
 
 from app.agents.base import BaseAgent
 from app.agents.state import AgentState
+from app.agents.nl_arithmetic import build_expression as _build_nl_expression
+from app.agents.tool_mapping import resolve_sub_tool
 from app.services.tools.registry import tool_registry
 
 _MATH_EXPR = re.compile(r"[-+/*^%().\d\s]{3,}")
@@ -59,26 +61,13 @@ _MATH_EXPR = re.compile(r"[-+/*^%().\d\s]{3,}")
 # tool_agent must use the same set or weather questions will be missed
 # (e.g., "Mumbai rain" has "rain" which planner detects, but tool_agent's
 # old regex was too narrow and couldn't find it, causing a routing failure).
-_WEATHER_KEYWORDS = re.compile(
-    r"\b(weather|temperature|forecast|climate|temp|rain|snow|sunny|cloudy|"
-    r"humid|windy|precipitation)\b|will\s+it\s+(?:rain|snow)",
-    re.IGNORECASE,
-)
-
-# Explicit product names -- checked FIRST so a question that names its
-# target ("send an email...", "post this in slack...") is never
-# hijacked by a generic word ("message", "post", "send") that happens
-# to appear in both kinds of requests.
-_SLACK_EXPLICIT = re.compile(r"\bslack\b", re.IGNORECASE)
-_EMAIL_EXPLICIT = re.compile(r"\b(email|e-mail|mail)\b", re.IGNORECASE)
-
-# Generic fallback keyword sets -- only consulted when NEITHER product is
-# named explicitly. "message" was removed from the Slack set because it
-# is equally common in email requests and was the direct cause of the
-# misrouting bug; "channel"/"alert"/"post" are Slack-specific enough to
-# keep.
-_SLACK_KEYWORDS = re.compile(r"\b(slack|post|alert|channel)\b", re.IGNORECASE)
-_EMAIL_KEYWORDS = re.compile(r"\b(email|e-mail|mail|send)\b", re.IGNORECASE)
+#
+# STAGE 13 FIX (2026-08-13): the weather/slack/email keyword sets, and
+# the sub-tool dispatch logic in _handle_tool below, now live in
+# app.agents.tool_mapping and are imported here rather than duplicated,
+# so the planner (which sets state.tool right after routing) and this
+# agent (which actually executes that tool) can never drift apart on
+# what a question resolves to.
 
 _CHANNEL_PATTERN = re.compile(r"#[\w-]+")
 _EMAIL_ADDR_PATTERN = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
@@ -90,12 +79,24 @@ _LOCATION_STOPWORDS = {
 
 
 def _extract_expression(question: str) -> Optional[str]:
-    """Extract mathematical expression from question."""
+    """
+    Extract mathematical expression from question.
+
+    STAGE 13 FIX (planner eval failure CALC_04 downstream half): the
+    planner can now route natural-language arithmetic ("250 items,
+    remove 37") to the calculator, but this function only ever looked
+    for a literal symbolic expression -- so even correctly-routed NL
+    questions would reach here, find no "+/-*/" characters, and fail
+    with "No math expression found". Symbolic extraction is tried
+    first (unchanged, preserves existing behavior for symbolic
+    questions); NL expression building via app.agents.nl_arithmetic is
+    only used as a fallback when no symbol is present.
+    """
     q = question.replace("×", "*").replace("÷", "/").replace("^", "**")
     match = _MATH_EXPR.search(q)
     if match and any(ch.isdigit() for ch in match.group(0)):
         return match.group(0).strip()
-    return None
+    return _build_nl_expression(question)
 
 
 def _extract_location(question: str) -> Optional[str]:
@@ -259,50 +260,23 @@ class ToolAgent(BaseAgent):
         - Slack keywords → Slack API
         - Email keywords → SMTP/Gmail
 
-        Explicit product names ("slack" / "email") are checked before
-        generic keyword sets so overlapping generic words ("message",
-        "send", "post") can no longer steal a request that actually
-        named its target.
+        STAGE 13 FIX: sub-tool selection now delegates to
+        app.agents.tool_mapping.resolve_sub_tool -- the same function
+        the planner uses to set state.tool right after routing -- so
+        this can never pick a different concrete tool than the one the
+        planner already reported.
         """
-        question = state.question.lower()
+        sub_tool = resolve_sub_tool(state.question)
 
-        # Weather takes priority over messaging keywords regardless.
-        if _WEATHER_KEYWORDS.search(question):
+        if sub_tool == "weather":
             await self._handle_weather(state)
-            return
-
-        slack_named = bool(_SLACK_EXPLICIT.search(question))
-        email_named = bool(_EMAIL_EXPLICIT.search(question))
-
-        if slack_named and not email_named:
+        elif sub_tool == "slack":
             await self._handle_slack(state)
-            return
-        
-        if email_named and not slack_named:
+        elif sub_tool == "email":
             await self._handle_email(state)
-            return
-        
-        if slack_named and email_named:
-            # Both named in the same question -- genuinely ambiguous.
-            # Default to email: it's the more targeted/private channel,
-            # so defaulting there is the safer failure mode than
-            # broadcasting to a shared Slack channel by mistake.
-            print("[TOOL] Both 'slack' and 'email' named -- defaulting to email")
-            await self._handle_email(state)
-            return
-
-        # Neither product named explicitly -- fall back to generic
-        # keyword sets (weaker signal, kept for backward compatibility).
-        if _SLACK_KEYWORDS.search(question):
-            await self._handle_slack(state)
-            return
-        
-        if _EMAIL_KEYWORDS.search(question):
-            await self._handle_email(state)
-            return
-
-        print("[TOOL] No specific tool matched in generic 'tool' source")
-        state.tool_results["tool"] = {"error": "Could not determine which tool to use"}
+        else:
+            print("[TOOL] No specific tool matched in generic 'tool' source")
+            state.tool_results["tool"] = {"error": "Could not determine which tool to use"}
 
     async def _handle_weather(self, state: AgentState) -> None:
         """Execute weather (OpenWeatherMap) query."""

@@ -83,6 +83,12 @@ class AgentState:
     # ── Planner output ───────────────────────────────────────────────────
     plan: str = ""
     sources_needed: list[str] = field(default_factory=list)  # ["documents", "web"]
+    # Concrete tool name for single-source tool-backed routes, e.g.
+    # "calculator", "weather", "web_search". None for direct_llm/documents/
+    # database, or when multiple sources were selected (no single concrete
+    # tool applies). Set by PlannerAgent via app.agents.tool_mapping so
+    # this can never drift out of sync with what ToolAgent actually runs.
+    tool: Optional[str] = None
     confidence: float = 0.0
 
     # ── Retrieved data ───────────────────────────────────────────────────
