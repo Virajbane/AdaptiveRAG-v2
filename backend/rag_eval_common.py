@@ -312,6 +312,10 @@ def load_golden_set_v2(path: str) -> Dict[str, Any]:
     files keep working unchanged -- ingestion_check just comes back None
     and that section of the report is skipped with a clear note, not a
     crash.
+    
+    Automatically filters out comment-only entries (items with no "type" field),
+    which are useful for documentation but not test items. This prevents
+    KeyError: 'type' crashes when the eval loop processes items.
     """
     import json
 
@@ -325,7 +329,16 @@ def load_golden_set_v2(path: str) -> Dict[str, Any]:
         items = raw.get("items", [])
         ingestion_check = raw.get("ingestion_check")
 
-    placeholders = [it["id"] for it in items if "REPLACE" in json.dumps(it) or "SET_AFTER" in json.dumps(it)]
+    # ✅ NEW: Filter out comment-only entries (no "type" field)
+    # Items with only a "comment" field are documentation, not test items.
+    # This prevents KeyError: 'type' in eval_rag.py line 464.
+    comment_items = [it for it in items if isinstance(it, dict) and "type" not in it]
+    if comment_items:
+        print(f"[INFO] Filtered out {len(comment_items)} comment-only entries from golden set")
+    items = [it for it in items if isinstance(it, dict) and "type" in it]
+
+    # Filter out items with placeholder values
+    placeholders = [it.get("id", "?") for it in items if "REPLACE" in json.dumps(it) or "SET_AFTER" in json.dumps(it)]
     if placeholders:
         print(f"[WARN] {len(placeholders)} golden set entries still contain "
               f"placeholder values and will be skipped: {placeholders}")
