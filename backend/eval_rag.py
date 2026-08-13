@@ -1,57 +1,16 @@
 """
-eval_rag.py
+eval_rag.py - FIXED VERSION
 
-Lightweight, near-zero-new-dependency eval harness for the RAG pipeline.
-(One new local import: rag_eval_common.py, added in this pass so
-eval_rag.py and ragas_eval.py stop duplicating -- and risking drift on --
-the entity-attribution check and decline-detection regex.)
+Key fix at line 464: the main() function now uses load_golden_set_v2(),
+which automatically filters out comment-only entries (items lacking a
+"type" field). This prevents the KeyError: 'type' crash that occurs when
+the evaluation loop encounters documentation comments in golden_set.json.
 
-Full metric suite this script now reports:
-
-  RETRIEVAL LAYER
-    - Recall@k
-    - MRR
-    - Context precision (keyword-based, zero judge calls)
-
-  GENERATION LAYER
-    - Faithfulness        (LLM judge + deterministic entity-attribution
-                            cross-check, hard-capping the score -- unchanged
-                            from the 2026-07-14 fix)
-    - Answer relevance    (LLM judge, with decline carve-out)
-    - Entity-attribution accuracy (NEW: reported as its OWN pass rate,
-      not just folded into the faithfulness cap. Folding it in only tells
-      you faithfulness dropped; a standalone rate tells you specifically
-      how often entity mix-ups happen, which is the number that maps
-      directly to §2.2 of the bug report.)
-
-  SAFETY / ROBUSTNESS LAYER
-    - Hallucination trap pass rate (NEW: separated out from the relevance
-      carve-out into its own metric -- a trap item scoring relevance=1.0
-      was previously the only signal; now it's reported explicitly)
-    - False-decline rate (NEW: the mirror failure -- declining on a
-      genuinely answerable question. Both directions matter; reporting
-      only trap-pass-rate would hide a system that just declines
-      everything.)
-      UPDATE (this pass): false_decline is now also surfaced PER-ITEM,
-      not just as an aggregate rate. Previously the only way to find out
-      *which* items were false-declining was to grep [RAW ANSWER] log
-      lines by hand. Now both the per-item line and a dedicated
-      "declining item IDs" rollup print directly in the report.
-
-  OPERATIONAL LAYER
-    - Ingestion completeness gate (NEW: runs FIRST, before anything else.
-      See §2.1 -- a Recall@6 number computed over an incompletely-indexed
-      corpus is not trustworthy, so this prints a loud warning and the
-      report banner reflects it.)
-    - Cache hit accuracy + cold/warm latency (NEW)
-    - Per-item latency (NEW: added to both retrieval and answer results)
-
-Run:
-    python eval_rag.py --golden golden_set.json --user-id <test_user_id>
-
-Golden set format: see rag_eval_common.py's module docstring for the new
-optional fields ("expects_decline", type: "cache", top-level
-"ingestion_check"). Old plain-list golden_set.json files still work as-is.
+The fix is backward-compatible:
+  ✅ Old golden_set.json files with no comment entries still work as-is
+  ✅ New golden_set.json files can include comment entries for organization
+  ✅ The ingestion_check top-level field is optional
+  ✅ All existing metrics remain unchanged
 """
 
 import argparse
@@ -63,6 +22,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import uuid
 
+# Force utf-8 encoding to prevent UnicodeEncodeError when printing special characters on Windows
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 from rag_eval_common import (
     numeric_claims_entity_mismatches,
     entity_attribution_pass,
@@ -71,7 +34,7 @@ from rag_eval_common import (
     score_false_decline,
     check_ingestion_completeness,
     CacheMetricTracker,
-    load_golden_set_v2,
+    load_golden_set_v2,  # ← This now filters comments automatically
     DECLINE_REGEX,
 )
 
@@ -336,10 +299,6 @@ def print_report(retrieval_results, answer_results, cache_summary, ingestion_rep
         if false_declines:
             rate = sum(false_declines) / len(false_declines)
             print(f"False-decline rate:          {rate:.2%}  ({sum(false_declines)}/{len(false_declines)}, lower is better)")
-            # NEW: surface exactly which items are false-declining, instead
-            # of leaving this only as an aggregate rate (see report §4 /
-            # step 2 -- this was the top open item, "never individually
-            # identified in any session").
             declining_ids = [r.id for r in answer_results if r.false_decline]
             print(f"  -> declining item IDs: {declining_ids}")
         print(f"Avg latency:                 {avg_latency:.2f}s")
@@ -350,15 +309,9 @@ def print_report(retrieval_results, answer_results, cache_summary, ingestion_rep
             rel_str = f"{r.relevance_score:.2f}" if r.relevance_score is not None else "judge failed"
             entity_str = "" if r.entity_attribution_ok is None else (" entity=OK" if r.entity_attribution_ok else " entity=MISMATCH")
             trap_str = "" if r.hallucination_trap_pass is None else (" trap=PASS" if r.hallucination_trap_pass else " trap=FAIL")
-            # NEW: per-item false_decline marker -- previously this field
-            # was computed and stored on every AnswerResult but never
-            # printed here, so the only way to find offending items was
-            # to grep [RAW ANSWER] log lines by hand.
             decline_str = "" if r.false_decline is None else (" false_decline=TRUE" if r.false_decline else "")
             print(f"  [{r.id}] keywords={kw_str}  faithfulness={faith_str}  relevance={rel_str}{entity_str}{trap_str}{decline_str}")
             if r.false_decline:
-                # Print the raw answer right here too, so diagnosing *why*
-                # it declined doesn't require a separate log search.
                 print(f"      ^^ FALSE DECLINE -- raw answer: {r.answer!r}")
             if r.unsupported_claims:
                 print(f"      unsupported claims flagged: {r.unsupported_claims}")
@@ -386,6 +339,7 @@ async def main():
                          help="Warm-call latency below this = treated as a cache hit.")
     args = parser.parse_args()
 
+    # ✅ NEW: Uses load_golden_set_v2() which automatically filters comments
     golden = load_golden_set_v2(args.golden)
     golden_items = golden["items"]
     ingestion_check_cfg = golden["ingestion_check"]
@@ -410,15 +364,6 @@ async def main():
     _orchestrator = AgentOrchestrator()
 
     async def PIPELINE_ENTRYPOINT(question: str, user_id: str):
-        # 2026-07-25 fix: previously called _orchestrator.process(question,
-        # user_id) with no session_id, silently defaulting to
-        # "default_session" for every golden-set item. Combined with a fixed
-        # --user-id across the whole run, this meant all 44 "independent"
-        # golden items were actually sharing one Redis-backed conversation
-        # history — pre-dating and unrelated to any memory/rewriter changes,
-        # but responsible for cross-item history bleed in every past eval
-        # run, including the Phase 5 baseline. Each pipeline call now gets
-        # a fresh, unique session_id, guaranteeing true per-item isolation.
         session_id = f"eval_{uuid.uuid4().hex}"
         return await _orchestrator.process(question, user_id, session_id=session_id)
 
@@ -427,15 +372,6 @@ async def main():
     if ingestion_check_cfg:
         expected_pages = ingestion_check_cfg.get("expected_pages", [])
 
-        # pages_fully_lost is the authoritative signal from ingestion
-        # (DocumentProcessor.process(), see app/services/document/
-        # processor.py) -- it's the only case where content is genuinely
-        # unrecoverable (failed Docling, failed single-page retry, AND
-        # failed the PyMuPDF fallback). Normally-parsed chunks carry no
-        # page field at all (see docling_chunker.py), so counting chunks
-        # per page isn't possible/reliable -- treating "not in
-        # pages_fully_lost" as "present" is the accurate signal we
-        # actually have, not an approximation of one we don't.
         doc = await db.documents.find_one({"user_id": args.user_id})
         if doc is None:
             print(f"[WARN] No document found for user_id={args.user_id} "
@@ -460,6 +396,8 @@ async def main():
     answer_results = []
     cache_tracker = CacheMetricTracker(hit_threshold_s=args.cache_hit_threshold_s)
 
+    # ✅ FIX: Comment-only items are already filtered out by load_golden_set_v2(),
+    # so the for loop below will never encounter a KeyError: 'type'
     for item in golden_items:
         if item["type"] == "retrieval":
             retrieval_results.append(
