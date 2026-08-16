@@ -1,0 +1,244 @@
+{
+  "ingestion_check": {
+    "expected_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "note": "Full 22-page Lychee paper required. Missing pages indicate incomplete ingestion \u00e2\u20ac\u201d all metrics become unreliable."
+  },
+  "items": [
+    {
+      "id": "L1_Q1",
+      "type": "retrieval",
+      "question": "What is the core problem that Lychee-FD addresses in full-duplex SLMs?",
+      "expected_answer_contains": [
+        "modality interference",
+        "gradient conflicts",
+        "full-duplex"
+      ]
+    },
+    {
+      "id": "L1_Q2",
+      "type": "answer",
+      "question": "According to the abstract, what are the two key performance improvements Lychee-FD achieves?",
+      "reference": "7.4% improvement on Spoken QA and 28.5% gain on FullDuplexBench 1.5",
+      "expected_answer_contains": [
+        "7.4%",
+        "28.5%"
+      ]
+    },
+    {
+      "id": "L1_Q3",
+      "type": "answer",
+      "question": "What is the main limitation of half-duplex systems mentioned in the introduction?",
+      "reference": "Rigid alternation between listening and speaking disrupts fluidity of interaction",
+      "expected_answer_contains": [
+        "turn-taking",
+        "sequential",
+        "disrupts"
+      ]
+    },
+    {
+      "id": "L1_Q4",
+      "type": "retrieval",
+      "question": "What performance drop does Moshi experience after full-duplex alignment?",
+      "expected_answer_contains": [
+        "-12.7%",
+        "LlamaQ"
+      ]
+    },
+    {
+      "id": "L2_Q5",
+      "type": "answer",
+      "question": "Name the three main paradigms for full-duplex systems discussed in Section 2.2",
+      "reference": "Full-Duplex Dialogue System (VAD-based), Time-Division Multiplexing (TDM), Channel-Division Multiplexing (CDM)",
+      "expected_answer_contains": [
+        "Dialogue System",
+        "Multiplexing",
+        "Channel"
+      ]
+    },
+    {
+      "id": "L2_Q6",
+      "type": "answer",
+      "question": "What is the key difference between Thinker-Talker and Native End-to-End architectures?",
+      "reference": "Thinker-Talker decouples acoustic generation from LLM backbone; Native End-to-End embeds both in shared semantic space",
+      "expected_answer_contains": [
+        "decouple",
+        "shared",
+        "LLM"
+      ]
+    },
+    {
+      "id": "L2_Q7",
+      "type": "retrieval",
+      "question": "Which architectures use CDM (Channel-Division Multiplexing) approach?",
+      "expected_answer_contains": [
+        "FLM-Audio",
+        "Moshi",
+        "Chen"
+      ]
+    },
+    {
+      "id": "L3_Q8",
+      "type": "answer",
+      "question": "What two gradient-based observations reveal the root cause of modality interference?",
+      "reference": "Gradient Cosine Similarity (orthogonality in deep layers) and Gradient Magnitude Ratio (semantic dilution)",
+      "expected_answer_contains": [
+        "Cosine Similarity",
+        "Magnitude Ratio"
+      ]
+    },
+    {
+      "id": "L3_Q9",
+      "type": "answer",
+      "question": "In Figure 2a, at what layer depth does gradient cosine similarity transition from positive to negative?",
+      "reference": "Around layer 9-10, becomes increasingly negative in deeper layers",
+      "expected_answer_contains": [
+        "layer",
+        "positive",
+        "negative",
+        "9",
+        "10"
+      ]
+    },
+    {
+      "id": "L3_Q10",
+      "type": "answer",
+      "question": "What frequency mismatch between text and audio is addressed using padding tokens?",
+      "reference": "Text at 3Hz vs audio at 25Hz",
+      "expected_answer_contains": [
+        "3Hz",
+        "25Hz",
+        "padding"
+      ]
+    },
+    {
+      "id": "L3_Q11",
+      "type": "retrieval",
+      "question": "What does semantic dilution mean in the context of full-duplex SLMs?",
+      "expected_answer_contains": [
+        "gradient magnitude",
+        "padding tokens",
+        "suppression"
+      ]
+    },
+    {
+      "id": "L4_Q12",
+      "type": "answer",
+      "question": "What is the name of Lychee-FD's backbone model and what is its frame rate for acoustic tokenization?",
+      "reference": "StepAudio-2-mini as backbone; 25Hz frame rate for CosyVoice2 tokenizer",
+      "expected_answer_contains": [
+        "StepAudio-2-mini",
+        "25Hz"
+      ]
+    },
+    {
+      "id": "L4_Q13",
+      "type": "answer",
+      "question": "How many Transformer layers comprise the shared backbone in Lychee-FD's architecture?",
+      "reference": "24 Transformer layers",
+      "expected_answer_contains": [
+        "24"
+      ]
+    },
+    {
+      "id": "L4_Q14",
+      "type": "answer",
+      "question": "Name the three specialized heads that branch from Lychee-FD's shared backbone in deep layers",
+      "reference": "Semantic Head (text generation), Acoustic Head (speech synthesis), Control Head (interaction management)",
+      "expected_answer_contains": [
+        "Semantic",
+        "Acoustic",
+        "Control"
+      ]
+    },
+    {
+      "id": "L4_Q15",
+      "type": "answer",
+      "question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
+      "reference": "Generates coherent internal monologues to maintain high-magnitude gradient flow for language modeling during training",
+      "expected_answer_contains": [
+        "monologues",
+        "gradient",
+        "semantic"
+      ]
+    },
+    {
+      "id": "L4_Q16",
+      "type": "answer",
+      "question": "In Equation 6, what does Om represent in the hierarchical parameter separation?",
+      "reference": "Output logits for each modality head (Text, Acoustic, Control)",
+      "expected_answer_contains": [
+        "logits",
+        "output",
+        "modality"
+      ]
+    },
+    {
+      "id": "L5_Q17",
+      "type": "answer",
+      "question": "What optimizer and learning rate schedule are used to train Lychee-FD?",
+      "reference": "AdamW optimizer with cosine learning rate scheduler",
+      "expected_answer_contains": [
+        "AdamW",
+        "cosine"
+      ]
+    },
+    {
+      "id": "L5_Q18",
+      "type": "answer",
+      "question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
+      "reference": "Learning rate 3e-6; 8 NVIDIA H20 GPUs",
+      "expected_answer_contains": [
+        "3e-6",
+        "8",
+        "H20"
+      ]
+    },
+    {
+      "id": "L5_Q19",
+      "type": "answer",
+      "question": "What global batch size and training duration are used?",
+      "reference": "Global batch size 32; 1 epoch training taking approximately 16 hours",
+      "expected_answer_contains": [
+        "32",
+        "1 epoch",
+        "16 hours"
+      ]
+    },
+    {
+      "id": "L5_Q20",
+      "type": "answer",
+      "question": "How is the hierarchical architecture configured in terms of layer counts for each head?",
+      "reference": "4 layers for text channel, 4 layers for speech channel, 2 layers for control channel",
+      "expected_answer_contains": [
+        "4 layers",
+        "text",
+        "speech",
+        "2 layers",
+        "control"
+      ]
+    }
+  ]
+}

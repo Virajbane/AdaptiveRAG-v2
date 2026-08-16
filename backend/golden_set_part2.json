@@ -1,0 +1,224 @@
+{
+  "ingestion_check": {
+    "expected_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "note": "Full 22-page Lychee paper required. Missing pages indicate incomplete ingestion \u00e2\u20ac\u201d all metrics become unreliable."
+  },
+  "items": [
+    {
+      "id": "L6_Q21",
+      "type": "answer",
+      "question": "In Table 1, what is Lychee-FD's average accuracy across both S\u00e2\u2020\u2019T and S\u00e2\u2020\u2019S settings?",
+      "reference": "S\u00e2\u2020\u2019T: 51.5, S\u00e2\u2020\u2019S: 46.2",
+      "expected_answer_contains": [
+        "51.5",
+        "46.2"
+      ]
+    },
+    {
+      "id": "L6_Q22",
+      "type": "answer",
+      "question": "What is Lychee-FD's takeover rate (TOR) in Table 1, and what does it indicate?",
+      "reference": "100%, indicating perfect knowledge retention without compromising interaction stability",
+      "expected_answer_contains": [
+        "100%",
+        "knowledge"
+      ]
+    },
+    {
+      "id": "L6_Q23",
+      "type": "answer",
+      "question": "In the ablation studies (Table 1), what S\u00e2\u2020\u2019S accuracy does 'w/o Param-Sep' achieve?",
+      "reference": "27.6%",
+      "expected_answer_contains": [
+        "27.6"
+      ]
+    },
+    {
+      "id": "L6_Q24",
+      "type": "answer",
+      "question": "In the ablation studies (Table 1), what S\u00e2\u2020\u2019T accuracy does 'w/o Sem-Channel' achieve?",
+      "reference": "45.9%",
+      "expected_answer_contains": [
+        "45.9"
+      ]
+    },
+    {
+      "id": "L6_Q25",
+      "type": "answer",
+      "question": "Compared to Fun-Audio-Chat (previous SOTA), what is Lychee-FD's improvement in S\u00e2\u2020\u2019S accuracy?",
+      "reference": "7.4% improvement",
+      "expected_answer_contains": [
+        "7.4%"
+      ]
+    },
+    {
+      "id": "L7_Q26",
+      "type": "answer",
+      "question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
+      "reference": "86.3",
+      "expected_answer_contains": [
+        "86.3"
+      ]
+    },
+    {
+      "id": "L7_Q27",
+      "type": "answer",
+      "question": "In Table 2 FullDuplexBench 1.5, what is Lychee-FD's Interruption-Response Rate (IRR)?",
+      "reference": "78.0",
+      "expected_answer_contains": [
+        "78.0"
+      ]
+    },
+    {
+      "id": "L7_Q28",
+      "type": "answer",
+      "question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5 in milliseconds?",
+      "reference": "826 ms",
+      "expected_answer_contains": [
+        "826"
+      ]
+    },
+    {
+      "id": "L7_Q29",
+      "type": "answer",
+      "question": "What improvement does Lychee-FD achieve over Freeze-Omni on FullDuplexBench 1.5?",
+      "reference": "28.5% average improvement",
+      "expected_answer_contains": [
+        "28.5%"
+      ]
+    },
+    {
+      "id": "L7_Q30",
+      "type": "retrieval",
+      "question": "Which metrics are used to evaluate turn-taking and interruption behaviors on FDBench?",
+      "expected_answer_contains": [
+        "SRR",
+        "SIR",
+        "EIR",
+        "SRIR"
+      ]
+    },
+    {
+      "id": "L8_Q31",
+      "type": "answer",
+      "question": "In Figure 4, what UTMOS score does Lychee-FD achieve for speech synthesis quality?",
+      "reference": "4.50",
+      "expected_answer_contains": [
+        "4.50"
+      ]
+    },
+    {
+      "id": "L8_Q32",
+      "type": "answer",
+      "question": "In Figure 4, what UTMOS score does Moshi achieve?",
+      "reference": "3.31",
+      "expected_answer_contains": [
+        "3.31"
+      ]
+    },
+    {
+      "id": "L8_Q33",
+      "type": "answer",
+      "question": "In Figure 4, what UTMOS score does the 'w/o Param-Sep' ablation variant achieve?",
+      "reference": "3.72",
+      "expected_answer_contains": [
+        "3.72"
+      ]
+    },
+    {
+      "id": "L8_Q34",
+      "type": "answer",
+      "question": "What two metrics are used to evaluate speech generation quality in Section 4.6?",
+      "reference": "Word Error Rate (WER) for content consistency and UTMOS for naturalness",
+      "expected_answer_contains": [
+        "WER",
+        "UTMOS"
+      ]
+    },
+    {
+      "id": "L9_Q35",
+      "type": "answer",
+      "question": "In Section 5, which other full-duplex SLM architecture is analyzed for universal gradient conflicts?",
+      "reference": "Moshi architecture",
+      "expected_answer_contains": [
+        "Moshi"
+      ]
+    },
+    {
+      "id": "L9_Q36",
+      "type": "answer",
+      "question": "What does Figure 5 demonstrate about modality interference across different architectures?",
+      "reference": "Shows similar layer-wise pattern of gradient conflicts in Moshi, confirming modality interference is universal bottleneck",
+      "expected_answer_contains": [
+        "universal",
+        "gradient",
+        "layers",
+        "Moshi"
+      ]
+    },
+    {
+      "id": "L10_Q37",
+      "type": "answer",
+      "question": "In Figure 6 (layer ablation), at how many layers does accuracy on LlamaQ saturate?",
+      "reference": "4 layers",
+      "expected_answer_contains": [
+        "4"
+      ]
+    },
+    {
+      "id": "L10_Q38",
+      "type": "answer",
+      "question": "What accuracy does Lychee-FD achieve with 4 separated layers according to Figure 6?",
+      "reference": "Approximately 65.4%",
+      "expected_answer_contains": [
+        "65",
+        "4 layers"
+      ]
+    },
+    {
+      "id": "L11_Q39",
+      "type": "answer",
+      "question": "In Figure 7 (case study), what two key capabilities does Lychee-FD demonstrate?",
+      "reference": "Intentional Interruption (halts immediately) and Passive Backchannel (precise intent understanding)",
+      "expected_answer_contains": [
+        "Interruption",
+        "Backchannel",
+        "intent"
+      ]
+    },
+    {
+      "id": "L11_Q40",
+      "type": "answer",
+      "question": "What is the key limitation identified in Figure 8 regarding side-talk?",
+      "reference": "Model cannot reliably distinguish user-to-agent commands from user-to-human side-talk in multi-speaker scenarios",
+      "expected_answer_contains": [
+        "side-talk",
+        "distinguish",
+        "multi-speaker"
+      ]
+    }
+  ]
+}

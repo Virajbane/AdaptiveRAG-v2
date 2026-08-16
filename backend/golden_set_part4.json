@@ -1,0 +1,235 @@
+{
+  "ingestion_check": {
+    "expected_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "note": "Full 22-page Lychee paper required. Missing pages indicate incomplete ingestion \u00e2\u20ac\u201d all metrics become unreliable."
+  },
+  "items": [
+    {
+      "id": "HALLUC_H1",
+      "type": "answer",
+      "question": "Does the paper state that Lychee-FD requires multi-stage training like Thinker-Talker models?",
+      "reference": "No \u00e2\u20ac\u201d paper explicitly states Lychee-FD avoids intricate multi-stage training required by Thinker-Talker",
+      "expected_answer_contains": [
+        "no",
+        "avoid",
+        "simple",
+        "end-to-end"
+      ],
+      "note": "Tests ability to reject plausible-sounding false claim"
+    },
+    {
+      "id": "HALLUC_H2",
+      "type": "answer",
+      "question": "Does the paper report that parameter separation introduces additional inference latency overhead?",
+      "reference": "No \u00e2\u20ac\u201d DAG-PP ensures no additional latency because specialized heads execute in parallel",
+      "expected_answer_contains": [
+        "no",
+        "parallel",
+        "no overhead",
+        "efficient"
+      ],
+      "note": "Tests rejection of false efficiency claim"
+    },
+    {
+      "id": "DECLINE_D1",
+      "type": "answer",
+      "false_decline": false,
+      "question": "What is the Whisper-v3-large model used for in Lychee-FD?",
+      "reference": "Input audio encoding / processing",
+      "expected_answer_contains": [
+        "audio",
+        "encoder",
+        "encoding"
+      ],
+      "note": "This information IS in paper \u00e2\u20ac\u201d should NOT decline"
+    },
+    {
+      "id": "DECLINE_D2",
+      "type": "answer",
+      "false_decline": false,
+      "question": "What are the three specialized heads in Lychee-FD's hierarchical architecture?",
+      "reference": "Semantic Head, Acoustic Head, Control Head",
+      "expected_answer_contains": [
+        "Semantic",
+        "Acoustic",
+        "Control"
+      ],
+      "note": "Clear factual information \u00e2\u20ac\u201d should NOT decline"
+    },
+    {
+      "id": "MULTIHOP_M1",
+      "type": "answer",
+      "question": "The paper identifies two root causes of modality interference. What are they and how does Lychee-FD address each?",
+      "reference": "1) Gradient Conflict \u00e2\u2020\u2019 Fixed by Hierarchical Parameter Separation; 2) Semantic Dilution \u00e2\u2020\u2019 Fixed by Semantic Alignment Channel",
+      "expected_answer_contains": [
+        "gradient",
+        "separation",
+        "semantic",
+        "channel"
+      ]
+    },
+    {
+      "id": "MULTIHOP_M2",
+      "type": "answer",
+      "question": "How do the ablation results in Table 1 validate the two architectural innovations proposed in the paper?",
+      "reference": "w/o Param-Sep shows 27.6% S\u00e2\u2020\u2019S drop (validates parameter separation); w/o Sem-Channel shows 5.4% drop (validates alignment channel)",
+      "expected_answer_contains": [
+        "ablation",
+        "Param-Sep",
+        "Sem-Channel",
+        "drop"
+      ]
+    },
+    {
+      "id": "MULTIHOP_M3",
+      "type": "answer",
+      "question": "Compare Lychee-FD's approach to modality interference with the Thinker-Talker approach. What is the key trade-off?",
+      "reference": "Thinker-Talker avoids interference but requires multi-stage training and high latency; Lychee-FD maintains efficiency while resolving interference",
+      "expected_answer_contains": [
+        "Thinker-Talker",
+        "latency",
+        "efficiency",
+        "training"
+      ]
+    },
+    {
+      "id": "CACHE_C1",
+      "type": "answer",
+      "question": "What backbone model does Lychee-FD use as its half-duplex base?",
+      "reference": "StepAudio-2-mini",
+      "expected_answer_contains": [
+        "StepAudio-2-mini"
+      ],
+      "note": "REPEAT of L4_Q12 \u00e2\u20ac\u201d tests caching consistency"
+    },
+    {
+      "id": "CACHE_C2",
+      "type": "answer",
+      "question": "What three specialized heads branch from the shared backbone in Lychee-FD?",
+      "reference": "Semantic Head, Acoustic Head, Control Head",
+      "expected_answer_contains": [
+        "Semantic",
+        "Acoustic",
+        "Control"
+      ],
+      "note": "REPEAT of L4_Q14 \u00e2\u20ac\u201d tests consistency across retrieval"
+    },
+    {
+      "id": "CACHE_C3",
+      "type": "answer",
+      "question": "In Figure 4, what UTMOS score does Lychee-FD achieve?",
+      "reference": "4.50",
+      "expected_answer_contains": [
+        "4.50"
+      ],
+      "note": "REPEAT of L8_Q31 \u00e2\u20ac\u201d tests cache metrics"
+    },
+    {
+      "id": "PRECISION_P1",
+      "type": "answer",
+      "question": "What is the exact learning rate used in Lychee-FD training?",
+      "reference": "3e-6",
+      "expected_answer_contains": [
+        "3e-6"
+      ],
+      "note": "Tests precise numerical recall"
+    },
+    {
+      "id": "PRECISION_P2",
+      "type": "answer",
+      "question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
+      "reference": "24",
+      "expected_answer_contains": [
+        "24"
+      ],
+      "note": "Single specific number \u00e2\u20ac\u201d no tolerance"
+    },
+    {
+      "id": "PRECISION_P3",
+      "type": "answer",
+      "question": "What frame rate does CosyVoice2 tokenizer use in Lychee-FD?",
+      "reference": "25Hz",
+      "expected_answer_contains": [
+        "25"
+      ]
+    },
+    {
+      "id": "KEYWORD_K1",
+      "type": "answer",
+      "question": "What two modalities does Lychee-FD try to balance in full-duplex conversation?",
+      "reference": "Acoustic (speech) and Semantic (text/language) modalities",
+      "expected_answer_contains": [
+        "acoustic",
+        "semantic",
+        "speech",
+        "text"
+      ]
+    },
+    {
+      "id": "KEYWORD_K2",
+      "type": "answer",
+      "question": "What communication primitive is used in DAG-PP for distributing computation?",
+      "reference": "NCCL broadcast",
+      "expected_answer_contains": [
+        "NCCL",
+        "broadcast"
+      ]
+    },
+    {
+      "id": "CROSS_X1",
+      "type": "retrieval",
+      "question": "How does the paper justify why 4 layers of separation is optimal for the hierarchical architecture?",
+      "expected_answer_contains": [
+        "Figure 6",
+        "saturates",
+        "performance",
+        "computational"
+      ]
+    },
+    {
+      "id": "CROSS_X2",
+      "type": "retrieval",
+      "question": "What evidence from Appendix 9 supports the claim that hierarchical parameter separation eliminates destructive interference?",
+      "expected_answer_contains": [
+        "Figure 9",
+        "influence score",
+        "positive",
+        "0.205"
+      ]
+    },
+    {
+      "id": "CROSS_X3",
+      "type": "answer",
+      "question": "How do the data synthesis details in Appendix 11 support the claim that Lychee-FD achieves natural interaction?",
+      "reference": "140K diverse full-duplex dialogues with 19 speaking styles and multiple interruption motivations ensure robust training",
+      "expected_answer_contains": [
+        "140K",
+        "interruption",
+        "speaking styles"
+      ]
+    }
+  ]
+}

@@ -1,185 +1,378 @@
 {
   "ingestion_check": {
-    "expected_pages": [19, 20, 21, 22],
-    "document_id": "6a7239e07263592f331ae6d3",
-    "note": "Pages 19-22 = Global Gradient Influence Analysis, Real-Time Inference Algorithm (DAG-PP), Data Synthesis Pipeline, Interaction Behavior Modeling, Prompt Templates. These were the pages that previously failed ingestion."
+    "expected_pages": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    "note": "Full 22-page Lychee paper required. Missing pages indicate incomplete ingestion — all metrics become unreliable."
   },
   "items": [
-    { "id": "prose_01", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What backbone model does Lychee-FD use as its half-duplex base?",
-      "expected_answer_contains": ["StepAudio-2-mini", "Step-Audio-2-mini"] },
-    { "id": "prose_02", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What audio encoder does Lychee-FD use for input audio processing?",
-      "expected_answer_contains": ["Whisper-v3-large", "Whisper v3 large"] },
-    { "id": "prose_03", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What tokenizer converts audio into discrete speech tokens in Lychee-FD?",
-      "expected_answer_contains": ["CosyVoice2", "CosyVoice 2"] },
-    { "id": "prose_04", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What frame rate does Lychee-FD use for its acoustic tokenizer?",
-      "expected_answer_contains": ["25Hz", "25 Hz"] },
-    { "id": "prose_05", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "How many shared Transformer layers make up Lychee-FD's backbone?",
+    { "comment": "========== PAGE 1-2: ABSTRACT & INTRODUCTION ==========" },
+    
+    { "id": "L1_Q1", "type": "retrieval", "question": "What is the core problem that Lychee-FD addresses in full-duplex SLMs?",
+      "expected_answer_contains": ["modality interference", "gradient conflicts", "full-duplex"] },
+    
+    { "id": "L1_Q2", "type": "answer", "question": "According to the abstract, what are the two key performance improvements Lychee-FD achieves?",
+      "reference": "7.4% improvement on Spoken QA and 28.5% gain on FullDuplexBench 1.5",
+      "expected_answer_contains": ["7.4%", "28.5%"] },
+    
+    { "id": "L1_Q3", "type": "answer", "question": "What is the main limitation of half-duplex systems mentioned in the introduction?",
+      "reference": "Rigid alternation between listening and speaking disrupts fluidity of interaction",
+      "expected_answer_contains": ["turn-taking", "sequential", "disrupts"] },
+    
+    { "id": "L1_Q4", "type": "retrieval", "question": "What performance drop does Moshi experience after full-duplex alignment?",
+      "expected_answer_contains": ["-12.7%", "LlamaQ"] },
+
+    { "comment": "========== PAGE 2-3: BACKGROUND & RELATED WORK ==========" },
+    
+    { "id": "L2_Q5", "type": "answer", "question": "Name the three main paradigms for full-duplex systems discussed in Section 2.2",
+      "reference": "Full-Duplex Dialogue System (VAD-based), Time-Division Multiplexing (TDM), Channel-Division Multiplexing (CDM)",
+      "expected_answer_contains": ["Dialogue System", "Multiplexing", "Channel"] },
+    
+    { "id": "L2_Q6", "type": "answer", "question": "What is the key difference between Thinker-Talker and Native End-to-End architectures?",
+      "reference": "Thinker-Talker decouples acoustic generation from LLM backbone; Native End-to-End embeds both in shared semantic space",
+      "expected_answer_contains": ["decouple", "shared", "LLM"] },
+    
+    { "id": "L2_Q7", "type": "retrieval", "question": "Which architectures use CDM (Channel-Division Multiplexing) approach?",
+      "expected_answer_contains": ["FLM-Audio", "Moshi", "Chen"] },
+
+    { "comment": "========== PAGE 3-4: OPTIMIZATION DYNAMICS ANALYSIS ==========" },
+    
+    { "id": "L3_Q8", "type": "answer", "question": "What two gradient-based observations reveal the root cause of modality interference?",
+      "reference": "Gradient Cosine Similarity (orthogonality in deep layers) and Gradient Magnitude Ratio (semantic dilution)",
+      "expected_answer_contains": ["Cosine Similarity", "Magnitude Ratio"] },
+    
+    { "id": "L3_Q9", "type": "answer", "question": "In Figure 2a, at what layer depth does gradient cosine similarity transition from positive to negative?",
+      "reference": "Around layer 9-10, becomes increasingly negative in deeper layers",
+      "expected_answer_contains": ["layer", "positive", "negative", "9", "10"] },
+    
+    { "id": "L3_Q10", "type": "answer", "question": "What frequency mismatch between text and audio is addressed using padding tokens?",
+      "reference": "Text at 3Hz vs audio at 25Hz",
+      "expected_answer_contains": ["3Hz", "25Hz", "padding"] },
+    
+    { "id": "L3_Q11", "type": "retrieval", "question": "What does semantic dilution mean in the context of full-duplex SLMs?",
+      "expected_answer_contains": ["gradient magnitude", "padding tokens", "suppression"] },
+
+    { "comment": "========== PAGE 4-6: MODEL ARCHITECTURE & DESIGN ==========" },
+    
+    { "id": "L4_Q12", "type": "answer", "question": "What is the name of Lychee-FD's backbone model and what is its frame rate for acoustic tokenization?",
+      "reference": "StepAudio-2-mini as backbone; 25Hz frame rate for CosyVoice2 tokenizer",
+      "expected_answer_contains": ["StepAudio-2-mini", "25Hz"] },
+    
+    { "id": "L4_Q13", "type": "answer", "question": "How many Transformer layers comprise the shared backbone in Lychee-FD's architecture?",
+      "reference": "24 Transformer layers",
       "expected_answer_contains": ["24"] },
-    { "id": "prose_06", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "How many layers are used for the text channel, speech channel, and control channel heads respectively?",
-      "expected_answer_contains": ["4 layers", "2 layers"] },
-    { "id": "prose_07", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What optimizer is used to train Lychee-FD?",
-      "expected_answer_contains": ["AdamW"] },
-    { "id": "prose_08", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What global batch size is used during training?",
-      "expected_answer_contains": ["32"] },
-    { "id": "prose_09", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What learning rate is used during training?",
-      "expected_answer_contains": ["3e-6"] },
-    { "id": "prose_10", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "How many GPUs were used to run the experiments?",
-      "expected_answer_contains": ["8", "H20"] },
-    { "id": "prose_11", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "Approximately how many full-duplex dialogue instances are in the curated training dataset?",
-      "expected_answer_contains": ["140K", "140,000"] },
-    { "id": "prose_12", "type": "retrieval", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What improvement does the abstract report for Lychee-FD on Spoken QA tasks?",
+    
+    { "id": "L4_Q14", "type": "answer", "question": "Name the three specialized heads that branch from Lychee-FD's shared backbone in deep layers",
+      "reference": "Semantic Head (text generation), Acoustic Head (speech synthesis), Control Head (interaction management)",
+      "expected_answer_contains": ["Semantic", "Acoustic", "Control"] },
+    
+    { "id": "L4_Q15", "type": "answer", "question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
+      "reference": "Generates coherent internal monologues to maintain high-magnitude gradient flow for language modeling during training",
+      "expected_answer_contains": ["monologues", "gradient", "semantic"] },
+    
+    { "id": "L4_Q16", "type": "answer", "question": "In Equation 6, what does Om represent in the hierarchical parameter separation?",
+      "reference": "Output logits for each modality head (Text, Acoustic, Control)",
+      "expected_answer_contains": ["logits", "output", "modality"] },
+
+    { "comment": "========== PAGE 6-7: TRAINING DETAILS ==========" },
+    
+    { "id": "L5_Q17", "type": "answer", "question": "What optimizer and learning rate schedule are used to train Lychee-FD?",
+      "reference": "AdamW optimizer with cosine learning rate scheduler",
+      "expected_answer_contains": ["AdamW", "cosine"] },
+    
+    { "id": "L5_Q18", "type": "answer", "question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
+      "reference": "Learning rate 3e-6; 8 NVIDIA H20 GPUs",
+      "expected_answer_contains": ["3e-6", "8", "H20"] },
+    
+    { "id": "L5_Q19", "type": "answer", "question": "What global batch size and training duration are used?",
+      "reference": "Global batch size 32; 1 epoch training taking approximately 16 hours",
+      "expected_answer_contains": ["32", "1 epoch", "16 hours"] },
+    
+    { "id": "L5_Q20", "type": "answer", "question": "How is the hierarchical architecture configured in terms of layer counts for each head?",
+      "reference": "4 layers for text channel, 4 layers for speech channel, 2 layers for control channel",
+      "expected_answer_contains": ["4 layers", "text", "speech", "2 layers", "control"] },
+
+    { "comment": "========== PAGE 7-8: SPOKEN QUESTION ANSWERING EXPERIMENTS ==========" },
+    
+    { "id": "L6_Q21", "type": "answer", "question": "In Table 1, what is Lychee-FD's average accuracy across both S→T and S→S settings?",
+      "reference": "S→T: 51.5, S→S: 46.2",
+      "expected_answer_contains": ["51.5", "46.2"] },
+    
+    { "id": "L6_Q22", "type": "answer", "question": "What is Lychee-FD's takeover rate (TOR) in Table 1, and what does it indicate?",
+      "reference": "100%, indicating perfect knowledge retention without compromising interaction stability",
+      "expected_answer_contains": ["100%", "knowledge"] },
+    
+    { "id": "L6_Q23", "type": "answer", "question": "In the ablation studies (Table 1), what S→S accuracy does 'w/o Param-Sep' achieve?",
+      "reference": "27.6%",
+      "expected_answer_contains": ["27.6"] },
+    
+    { "id": "L6_Q24", "type": "answer", "question": "In the ablation studies (Table 1), what S→T accuracy does 'w/o Sem-Channel' achieve?",
+      "reference": "45.9%",
+      "expected_answer_contains": ["45.9"] },
+    
+    { "id": "L6_Q25", "type": "answer", "question": "Compared to Fun-Audio-Chat (previous SOTA), what is Lychee-FD's improvement in S→S accuracy?",
+      "reference": "7.4% improvement",
       "expected_answer_contains": ["7.4%"] },
 
-    { "id": "table_fig_01", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 1, what is Lychee-FD's average speech-to-speech (S→S) accuracy?",
-      "expected_answer_contains": ["46.2"] },
-    { "id": "table_fig_02", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 1, what is Lychee-FD's average speech-to-text (S→T) accuracy?",
-      "expected_answer_contains": ["51.5"] },
-    { "id": "table_fig_03", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 1, what is Lychee-FD's takeover rate (TOR)?",
-      "expected_answer_contains": ["100"] },
-    { "id": "table_fig_04", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 1, what does the S→S accuracy drop to in the 'w/o Param-Sep' ablation row?",
-      "expected_answer_contains": ["27.6"] },
-    { "id": "table_fig_05", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
+    { "comment": "========== PAGE 8-9: FULL-DUPLEX CHATTING EXPERIMENTS ==========" },
+    
+    { "id": "L7_Q26", "type": "answer", "question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
+      "reference": "86.3",
       "expected_answer_contains": ["86.3"] },
-    { "id": "table_fig_06", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 2, what is Lychee-FD's Interruption-Response Rate (IRR) on FullDuplexBench 1.5?",
-      "expected_answer_contains": ["78.0", "78"] },
-    { "id": "table_fig_07", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5, in milliseconds?",
+    
+    { "id": "L7_Q27", "type": "answer", "question": "In Table 2 FullDuplexBench 1.5, what is Lychee-FD's Interruption-Response Rate (IRR)?",
+      "reference": "78.0",
+      "expected_answer_contains": ["78.0"] },
+    
+    { "id": "L7_Q28", "type": "answer", "question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5 in milliseconds?",
+      "reference": "826 ms",
       "expected_answer_contains": ["826"] },
-    { "id": "table_fig_08", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Figure 4, what UTMOS score does Lychee-FD (Ours) achieve?",
+    
+    { "id": "L7_Q29", "type": "answer", "question": "What improvement does Lychee-FD achieve over Freeze-Omni on FullDuplexBench 1.5?",
+      "reference": "28.5% average improvement",
+      "expected_answer_contains": ["28.5%"] },
+    
+    { "id": "L7_Q30", "type": "retrieval", "question": "Which metrics are used to evaluate turn-taking and interruption behaviors on FDBench?",
+      "expected_answer_contains": ["SRR", "SIR", "EIR", "SRIR"] },
+
+    { "comment": "========== PAGE 9: SPEECH GENERATION & QUALITY ==========" },
+    
+    { "id": "L8_Q31", "type": "answer", "question": "In Figure 4, what UTMOS score does Lychee-FD achieve for speech synthesis quality?",
+      "reference": "4.50",
       "expected_answer_contains": ["4.50"] },
-    { "id": "table_fig_09", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Figure 4, what UTMOS score does Moshi achieve?",
+    
+    { "id": "L8_Q32", "type": "answer", "question": "In Figure 4, what UTMOS score does Moshi achieve?",
+      "reference": "3.31",
       "expected_answer_contains": ["3.31"] },
-    { "id": "table_fig_10", "type": "retrieval", "table_figure": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Figure 6, at how many separated layers does LlamaQ accuracy saturate?",
-      "expected_answer_contains": ["4 layers", "4"] },
+    
+    { "id": "L8_Q33", "type": "answer", "question": "In Figure 4, what UTMOS score does the 'w/o Param-Sep' ablation variant achieve?",
+      "reference": "3.72",
+      "expected_answer_contains": ["3.72"] },
+    
+    { "id": "L8_Q34", "type": "answer", "question": "What two metrics are used to evaluate speech generation quality in Section 4.6?",
+      "reference": "Word Error Rate (WER) for content consistency and UTMOS for naturalness",
+      "expected_answer_contains": ["WER", "UTMOS"] },
 
-    { "id": "ingest_01", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is the global influence score of the text task on the speech task under the fully shared baseline (Figure 9)?",
+    { "comment": "========== PAGE 9-10: OPTIMIZATION DYNAMICS EXTENSION ==========" },
+    
+    { "id": "L9_Q35", "type": "answer", "question": "In Section 5, which other full-duplex SLM architecture is analyzed for universal gradient conflicts?",
+      "reference": "Moshi architecture",
+      "expected_answer_contains": ["Moshi"] },
+    
+    { "id": "L9_Q36", "type": "answer", "question": "What does Figure 5 demonstrate about modality interference across different architectures?",
+      "reference": "Shows similar layer-wise pattern of gradient conflicts in Moshi, confirming modality interference is universal bottleneck",
+      "expected_answer_contains": ["universal", "gradient", "layers", "Moshi"] },
+
+    { "comment": "========== PAGE 17: LAYER ABLATION (APPENDIX 7) ==========" },
+    
+    { "id": "L10_Q37", "type": "answer", "question": "In Figure 6 (layer ablation), at how many layers does accuracy on LlamaQ saturate?",
+      "reference": "4 layers",
+      "expected_answer_contains": ["4"] },
+    
+    { "id": "L10_Q38", "type": "answer", "question": "What accuracy does Lychee-FD achieve with 4 separated layers according to Figure 6?",
+      "reference": "Approximately 65.4%",
+      "expected_answer_contains": ["65", "4 layers"] },
+
+    { "comment": "========== PAGE 17-18: CASE STUDIES (APPENDIX 8) ==========" },
+    
+    { "id": "L11_Q39", "type": "answer", "question": "In Figure 7 (case study), what two key capabilities does Lychee-FD demonstrate?",
+      "reference": "Intentional Interruption (halts immediately) and Passive Backchannel (precise intent understanding)",
+      "expected_answer_contains": ["Interruption", "Backchannel", "intent"] },
+    
+    { "id": "L11_Q40", "type": "answer", "question": "What is the key limitation identified in Figure 8 regarding side-talk?",
+      "reference": "Model cannot reliably distinguish user-to-agent commands from user-to-human side-talk in multi-speaker scenarios",
+      "expected_answer_contains": ["side-talk", "distinguish", "multi-speaker"] },
+
+    { "comment": "========== PAGE 19: GLOBAL GRADIENT INFLUENCE (APPENDIX 9) ==========" },
+    
+    { "id": "L12_Q41", "type": "answer", "question": "In Figure 9 (left), what is the global influence score of text on speech in fully shared baseline?",
+      "reference": "-0.129",
       "expected_answer_contains": ["-0.129"] },
-    { "id": "ingest_02", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is the global influence score of text on speech under Hierarchical Parameter Separation (Figure 9)?",
+    
+    { "id": "L12_Q42", "type": "answer", "question": "In Figure 9 (right), after hierarchical parameter separation, what does the text→speech influence score become?",
+      "reference": "0.205 (shifts from negative to positive)",
       "expected_answer_contains": ["0.205"] },
-    { "id": "ingest_03", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "Which inference engine does Lychee-FD customize to implement its real-time DAG-PP algorithm?",
+    
+    { "id": "L12_Q43", "type": "answer", "question": "What does a negative influence score (Im→i < 0) indicate in gradient analysis?",
+      "reference": "Destructive interference — optimizing one task degrades performance of another",
+      "expected_answer_contains": ["destructive", "interference"] },
+
+    { "comment": "========== PAGE 19: REAL-TIME INFERENCE (APPENDIX 10) ==========" },
+    
+    { "id": "L13_Q44", "type": "answer", "question": "What inference engine does Lychee-FD customize to achieve real-time full-duplex interaction?",
+      "reference": "vLLM",
       "expected_answer_contains": ["vLLM"] },
-    { "id": "ingest_04", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What communication primitive broadcasts the shared hidden states to the specialized-head GPUs in DAG-PP?",
+    
+    { "id": "L13_Q45", "type": "answer", "question": "What is DAG-PP and how does it solve multi-head inference bottlenecks?",
+      "reference": "Directed Acyclic Graph Pipeline Parallelism; uses 1-to-N tensor broadcast via NCCL to execute heads in parallel",
+      "expected_answer_contains": ["DAG-PP", "parallel", "NCCL"] },
+    
+    { "id": "L13_Q46", "type": "answer", "question": "In Algorithm 1, what primitive is used to broadcast shared hidden states to specialized heads?",
+      "reference": "NCCL_Broadcast",
       "expected_answer_contains": ["NCCL"] },
-    { "id": "ingest_05", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "How many distinct speaking styles can the User Agent's persona be sampled from during data synthesis?",
+
+    { "comment": "========== PAGE 20-22: DATA SYNTHESIS (APPENDIX 11) ==========" },
+    
+    { "id": "L14_Q47", "type": "answer", "question": "How many full-duplex dialogue instances comprise the final curated training dataset?",
+      "reference": "Approximately 140K",
+      "expected_answer_contains": ["140K"] },
+    
+    { "id": "L14_Q48", "type": "answer", "question": "How many distinct speaking styles can the User Agent sample from during data synthesis?",
+      "reference": "19 distinct styles",
       "expected_answer_contains": ["19"] },
-    { "id": "ingest_06", "type": "retrieval", "ingestion_recovery": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What probability is used for backchannel injection during post-processing of the synthetic data?",
-      "expected_answer_contains": ["0.5", "p = 0.5", "p=0.5"] },
+    
+    { "id": "L14_Q49", "type": "answer", "question": "Name three interruption motivations modeled in the data synthesis pipeline",
+      "reference": "Correction, Deeper Inquiry, Topic Shift, Strong Emotional Reaction, Impatience (any 3)",
+      "expected_answer_contains": ["Correction", "Inquiry", "Shift", "Emotional", "Impatience"] },
+    
+    { "id": "L14_Q50", "type": "answer", "question": "What probability is used to inject backchannels during data synthesis post-processing?",
+      "reference": "p = 0.5 (50%)",
+      "expected_answer_contains": ["0.5", "50%", "probability"] },
 
-    { "id": "fab_01", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What UTMOS score does Freeze-Omni achieve?",
-      "target_entity": "Freeze-Omni", "target_value": "4.21",
-      "decoy_values": ["4.44", "4.50", "3.31", "3.72"],
-      "reference": "Freeze-Omni achieves a UTMOS score of 4.21." },
-    { "id": "fab_02", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What UTMOS score does Step-Audio-2 (the backbone, not Lychee-FD) achieve?",
-      "target_entity": "Step-Audio-2", "target_value": "4.44",
-      "decoy_values": ["4.50", "4.21", "3.31"],
-      "reference": "Step-Audio-2 achieves a UTMOS score of 4.44." },
-    { "id": "fab_03", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is VITA 1.5's average speech-to-text (S→T) accuracy in Table 1, not Lychee-FD's?",
-      "target_entity": "VITA 1.5", "target_value": "50.8",
-      "decoy_values": ["51.5", "51.3"],
-      "reference": "VITA 1.5's average S→T accuracy is 50.8." },
-    { "id": "fab_04", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is Fun-Audio-Chat's average speech-to-speech (S→S) accuracy?",
-      "target_entity": "Fun-Audio-Chat", "target_value": "38.8",
-      "decoy_values": ["46.2", "40.9"],
-      "reference": "Fun-Audio-Chat's average S→S accuracy is 38.8." },
-    { "id": "fab_05", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is StepAudio-2-mini's (the half-duplex backbone's) average S→T accuracy, not Lychee-FD's?",
-      "target_entity": "StepAudio-2-mini", "target_value": "51.3",
-      "decoy_values": ["51.5"],
-      "reference": "StepAudio-2-mini's average S→T accuracy is 51.3." },
-    { "id": "fab_06", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is Moshi's Success-Replies Rate (SRR) on FDBench, not Lychee-FD's?",
-      "target_entity": "Moshi", "target_value": "41.4",
-      "decoy_values": ["86.3"],
-      "reference": "Moshi's SRR on FDBench is 41.4." },
-    { "id": "fab_07", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is VITA 1.5's Interrupt-Response-Delay (IRD) on FDBench?",
-      "target_entity": "VITA 1.5", "target_value": "9925",
-      "decoy_values": ["1210"],
-      "reference": "VITA 1.5's IRD on FDBench is 9925 ms." },
-    { "id": "fab_08", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is Freeze-Omni's response latency (Lat.) on FullDuplexBench 1.5?",
-      "target_entity": "Freeze-Omni", "target_value": "2066",
-      "decoy_values": ["826"],
-      "reference": "Freeze-Omni's Lat. on FullDuplexBench 1.5 is 2066 ms." },
-    { "id": "fab_09", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is FLM-audio's I-TOR on FullDuplexBench 1.0?",
-      "target_entity": "FLM-audio", "target_value": "91.0",
-      "decoy_values": ["91.7", "94.5"],
-      "reference": "FLM-audio's I-TOR on FullDuplexBench 1.0 is 91.0.",
-      "note": "dGSLM was dropped as the target entity here because it starts with a lowercase letter, so rag_eval_common.py's entity regex (\\b[A-Z][A-Za-z0-9\\-]{2,}\\b) can't detect it as a question entity -- the check would silently return None instead of testing anything." },
-    { "id": "fab_10", "type": "answer", "fabrication_trap": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In the layer ablation study (Figure 6), what accuracy is achieved at 0 separated layers, not the saturated value?",
-      "target_entity": "0 separated layers", "target_value": "36.0",
-      "decoy_values": ["65.4"],
-      "reference": "At 0 separated layers, LlamaQ accuracy is 36.0." },
+    { "comment": "========== FABRICATION TRAPS (Things NOT in paper) ==========" },
+    
+    { "id": "TRAP_T1", "type": "answer", "fabrication_trap": true, "question": "What is Freeze-Omni's UTMOS speech quality score reported in Figure 4?",
+      "target_entity": "Freeze-Omni",
+      "expects_decline": true,
+      "reference": "Paper does NOT report Freeze-Omni UTMOS score — Figure 4 only shows Freeze-Omni, Moshi, StepAudio-2, Lychee-FD (Ours), and ablation variant" },
+    
+    { "id": "TRAP_T2", "type": "answer", "fabrication_trap": true, "question": "What is VITA 1.5's average speech-to-text accuracy in Table 1?",
+      "target_entity": "VITA 1.5",
+      "expects_decline": true,
+      "reference": "Paper does NOT report VITA S→T accuracy in Table 1 — VITA appears only in other tables" },
+    
+    { "id": "TRAP_T3", "type": "answer", "fabrication_trap": true, "question": "How many parameters does the baseline model Moshi have?",
+      "target_entity": "Moshi",
+      "expects_decline": true,
+      "reference": "Paper does NOT specify Moshi's parameter count — focuses on Lychee-FD's ~10B parameters" },
+    
+    { "id": "TRAP_T4", "type": "answer", "fabrication_trap": true, "question": "What is the exact WER (Word Error Rate) achieved by Lychee-FD on speech-to-text conversion?",
+      "target_entity": "WER metric",
+      "expects_decline": true,
+      "reference": "Paper mentions WER is reported but does NOT provide specific numerical value in main text" },
+    
+    { "id": "TRAP_T5", "type": "answer", "fabrication_trap": true, "question": "How many open-source datasets were used to train Lychee-FD?",
+      "target_entity": "open-source datasets",
+      "expects_decline": true,
+      "reference": "Paper created SYNTHETIC dataset (140K instances) due to scarcity of open-source full-duplex datasets — should decline" },
+    
+    { "id": "TRAP_T6", "type": "answer", "fabrication_trap": true, "question": "What accuracy does the model 'SpeechGPT-5' achieve on LlamaQ benchmark?",
+      "target_entity": "SpeechGPT-5",
+      "expects_decline": true,
+      "reference": "Paper does NOT mention SpeechGPT-5 — should decline" },
+    
+    { "id": "TRAP_T7", "type": "answer", "fabrication_trap": true, "question": "What is dGSLM's performance improvement over Lychee-FD on the S→S setting?",
+      "target_entity": "dGSLM",
+      "expects_decline": true,
+      "reference": "Paper shows dGSLM achieves only 0.6 (essentially non-functional) — no improvement over Lychee-FD's 46.2" },
 
-    { "id": "ans_01", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "Why does modality interference occur in full-duplex SLMs according to this paper?",
-      "reference": "It stems from inherent gradient conflicts between acoustic and semantic modeling when both are forced to update within a shared deep parameter space, manifesting as optimization divergence (gradient directions turn negative in deep layers) and semantic dilution (padding tokens suppress semantic gradient magnitude)." },
-    { "id": "ans_02", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What are the two architectural innovations Lychee-FD introduces?",
-      "reference": "A hierarchical parameter separation strategy that decouples acoustic and semantic modeling in deep layers, and a semantic alignment channel that generates coherent internal monologues to counter semantic dilution." },
-    { "id": "ans_03", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is 'semantic dilution' as defined in the paper?",
-      "reference": "The suppression of semantic gradient magnitude that results from aligning sparse text tokens (~3Hz) with dense audio frames (~25Hz) via padding tokens, which causes the optimization landscape to be dominated by acoustic modeling." },
-    { "id": "ans_04", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What limitation does the paper identify regarding handling side-talk?",
-      "reference": "The model cannot reliably distinguish intentional user-to-agent commands from incidental user-to-human side-talk in open-mic, multi-speaker scenarios, and may incorrectly halt and respond to background conversation." },
-    { "id": "ans_05", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "How does hierarchical parameter separation preserve inference efficiency despite adding specialized heads?",
-      "reference": "The specialized heads execute in parallel across GPUs via a custom DAG Pipeline Parallelism (DAG-PP), so the effective model depth on the critical path is unchanged versus the half-duplex backbone." },
-    { "id": "decline_01", "type": "answer", "expects_decline": true, "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What accuracy does the model called 'GPT-5-Duplex' achieve on FullDuplexBench in this paper?",
-      "reference": "This paper does not mention or evaluate a model called GPT-5-Duplex; no such result exists in the document." },
-    { "id": "ans_07", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What tool and dataset combination is used for zero-shot voice cloning when synthesizing training speech?",
-      "reference": "Speech is synthesized via CosyVoice 2, coupled with 80K predefined voice prompts for zero-shot cloning." },
-    { "id": "ans_08", "type": "answer", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What does the Control Head manage in Lychee-FD's architecture?",
-      "reference": "The Control Head manages interaction/turn-taking signals, such as the stop and start of the model's speech." },
+    { "comment": "========== ENTITY ATTRIBUTION TESTS (Wrong entity associations) ==========" },
+    
+    { "id": "ENTITY_E1", "type": "answer", "question": "What is Moshi's average S→S accuracy from Table 1?",
+      "reference": "Moshi: 30.5 (NOT Lychee-FD's 46.2)",
+      "expected_answer_contains": ["30.5"],
+      "note": "Tests whether model confuses Moshi's performance with Lychee-FD's" },
+    
+    { "id": "ENTITY_E2", "type": "answer", "question": "What UTMOS score does Freeze-Omni achieve in Figure 4?",
+      "reference": "Freeze-Omni: 4.21 (NOT Lychee-FD's 4.50)",
+      "expected_answer_contains": ["4.21"],
+      "note": "Tests entity-specific number attribution" },
+    
+    { "id": "ENTITY_E3", "type": "answer", "question": "In Table 2, what is Fun-Audio-Chat's Success-Replies Rate (SRR)?",
+      "reference": "Paper does NOT show Fun-Audio-Chat in Table 2 — should decline",
+      "expected_answer_contains": [],
+      "note": "Tests whether model makes up data for missing rows" },
 
-    { "id": "cache_01", "type": "cache", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What backbone model does Lychee-FD use as its half-duplex base?",
-      "expected_answer_contains": ["StepAudio-2-mini", "Step-Audio-2-mini"] },
-    { "id": "cache_02", "type": "cache", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "In Table 1, what is Lychee-FD's average speech-to-speech (S→S) accuracy?",
-      "expected_answer_contains": ["46.2"] },
-    { "id": "cache_03", "type": "cache", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "What is the global influence score of the text task on the speech task under the fully shared baseline (Figure 9)?",
-      "expected_answer_contains": ["-0.129"] },
-    { "id": "cache_neardup_01", "type": "cache", "document_id": "6a7239e07263592f331ae6d3",
-      "question": "Which model does Lychee-FD use as its half-duplex starting point?",
-      "note": "Semantic rephrase of prose_01/cache_01, not an exact repeat -- the 'cache_neardup_' id prefix tells CacheMetricTracker to expect a MISS, testing that the exact-hash cache doesn't falsely treat this as identical to the earlier question." }
+    { "comment": "========== HALLUCINATION TRAP TESTS (Plausible but false claims) ==========" },
+    
+    { "id": "HALLUC_H1", "type": "answer", "question": "Does the paper state that Lychee-FD requires multi-stage training like Thinker-Talker models?",
+      "reference": "No — paper explicitly states Lychee-FD avoids intricate multi-stage training required by Thinker-Talker",
+      "expected_answer_contains": ["no", "avoid", "simple", "end-to-end"],
+      "note": "Tests ability to reject plausible-sounding false claim" },
+    
+    { "id": "HALLUC_H2", "type": "answer", "question": "Does the paper report that parameter separation introduces additional inference latency overhead?",
+      "reference": "No — DAG-PP ensures no additional latency because specialized heads execute in parallel",
+      "expected_answer_contains": ["no", "parallel", "no overhead", "efficient"],
+      "note": "Tests rejection of false efficiency claim" },
+
+    { "comment": "========== FALSE DECLINE TESTS (Should correctly answer, not decline) ==========" },
+    
+    { "id": "DECLINE_D1", "type": "answer", "false_decline": false, "question": "What is the Whisper-v3-large model used for in Lychee-FD?",
+      "reference": "Input audio encoding / processing",
+      "expected_answer_contains": ["audio", "encoder", "encoding"],
+      "note": "This information IS in paper — should NOT decline" },
+    
+    { "id": "DECLINE_D2", "type": "answer", "false_decline": false, "question": "What are the three specialized heads in Lychee-FD's hierarchical architecture?",
+      "reference": "Semantic Head, Acoustic Head, Control Head",
+      "expected_answer_contains": ["Semantic", "Acoustic", "Control"],
+      "note": "Clear factual information — should NOT decline" },
+
+    { "comment": "========== MULTI-HOP REASONING (Span multiple sections) ==========" },
+    
+    { "id": "MULTIHOP_M1", "type": "answer", "question": "The paper identifies two root causes of modality interference. What are they and how does Lychee-FD address each?",
+      "reference": "1) Gradient Conflict → Fixed by Hierarchical Parameter Separation; 2) Semantic Dilution → Fixed by Semantic Alignment Channel",
+      "expected_answer_contains": ["gradient", "separation", "semantic", "channel"] },
+    
+    { "id": "MULTIHOP_M2", "type": "answer", "question": "How do the ablation results in Table 1 validate the two architectural innovations proposed in the paper?",
+      "reference": "w/o Param-Sep shows 27.6% S→S drop (validates parameter separation); w/o Sem-Channel shows 5.4% drop (validates alignment channel)",
+      "expected_answer_contains": ["ablation", "Param-Sep", "Sem-Channel", "drop"] },
+    
+    { "id": "MULTIHOP_M3", "type": "answer", "question": "Compare Lychee-FD's approach to modality interference with the Thinker-Talker approach. What is the key trade-off?",
+      "reference": "Thinker-Talker avoids interference but requires multi-stage training and high latency; Lychee-FD maintains efficiency while resolving interference",
+      "expected_answer_contains": ["Thinker-Talker", "latency", "efficiency", "training"] },
+
+    { "comment": "========== CACHE & CONSISTENCY CHECKS (Repeated questions) ==========" },
+    
+    { "id": "CACHE_C1", "type": "answer", "question": "What backbone model does Lychee-FD use as its half-duplex base?",
+      "reference": "StepAudio-2-mini",
+      "expected_answer_contains": ["StepAudio-2-mini"],
+      "note": "REPEAT of L4_Q12 — tests caching consistency" },
+    
+    { "id": "CACHE_C2", "type": "answer", "question": "What three specialized heads branch from the shared backbone in Lychee-FD?",
+      "reference": "Semantic Head, Acoustic Head, Control Head",
+      "expected_answer_contains": ["Semantic", "Acoustic", "Control"],
+      "note": "REPEAT of L4_Q14 — tests consistency across retrieval" },
+    
+    { "id": "CACHE_C3", "type": "answer", "question": "In Figure 4, what UTMOS score does Lychee-FD achieve?",
+      "reference": "4.50",
+      "expected_answer_contains": ["4.50"],
+      "note": "REPEAT of L8_Q31 — tests cache metrics" },
+
+    { "comment": "========== NUMERICAL PRECISION TESTS ==========" },
+    
+    { "id": "PRECISION_P1", "type": "answer", "question": "What is the exact learning rate used in Lychee-FD training?",
+      "reference": "3e-6",
+      "expected_answer_contains": ["3e-6"],
+      "note": "Tests precise numerical recall" },
+    
+    { "id": "PRECISION_P2", "type": "answer", "question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
+      "reference": "24",
+      "expected_answer_contains": ["24"],
+      "note": "Single specific number — no tolerance" },
+    
+    { "id": "PRECISION_P3", "type": "answer", "question": "What frame rate does CosyVoice2 tokenizer use in Lychee-FD?",
+      "reference": "25Hz",
+      "expected_answer_contains": ["25"] },
+
+    { "comment": "========== KEYWORD MATCHING VALIDATION ==========" },
+    
+    { "id": "KEYWORD_K1", "type": "answer", "question": "What two modalities does Lychee-FD try to balance in full-duplex conversation?",
+      "reference": "Acoustic (speech) and Semantic (text/language) modalities",
+      "expected_answer_contains": ["acoustic", "semantic", "speech", "text"] },
+    
+    { "id": "KEYWORD_K2", "type": "answer", "question": "What communication primitive is used in DAG-PP for distributing computation?",
+      "reference": "NCCL broadcast",
+      "expected_answer_contains": ["NCCL", "broadcast"] },
+
+    { "comment": "========== CROSS-SECTION VALIDATION ==========" },
+    
+    { "id": "CROSS_X1", "type": "retrieval", "question": "How does the paper justify why 4 layers of separation is optimal for the hierarchical architecture?",
+      "expected_answer_contains": ["Figure 6", "saturates", "performance", "computational"] },
+    
+    { "id": "CROSS_X2", "type": "retrieval", "question": "What evidence from Appendix 9 supports the claim that hierarchical parameter separation eliminates destructive interference?",
+      "expected_answer_contains": ["Figure 9", "influence score", "positive", "0.205"] },
+    
+    { "id": "CROSS_X3", "type": "answer", "question": "How do the data synthesis details in Appendix 11 support the claim that Lychee-FD achieves natural interaction?",
+      "reference": "140K diverse full-duplex dialogues with 19 speaking styles and multiple interruption motivations ensure robust training",
+      "expected_answer_contains": ["140K", "interruption", "speaking styles"] }
+
   ]
 }

@@ -1,0 +1,221 @@
+{
+  "ingestion_check": {
+    "expected_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "note": "Full 22-page Lychee paper required. Missing pages indicate incomplete ingestion \u00e2\u20ac\u201d all metrics become unreliable."
+  },
+  "items": [
+    {
+      "id": "L12_Q41",
+      "type": "answer",
+      "question": "In Figure 9 (left), what is the global influence score of text on speech in fully shared baseline?",
+      "reference": "-0.129",
+      "expected_answer_contains": [
+        "-0.129"
+      ]
+    },
+    {
+      "id": "L12_Q42",
+      "type": "answer",
+      "question": "In Figure 9 (right), after hierarchical parameter separation, what does the text\u00e2\u2020\u2019speech influence score become?",
+      "reference": "0.205 (shifts from negative to positive)",
+      "expected_answer_contains": [
+        "0.205"
+      ]
+    },
+    {
+      "id": "L12_Q43",
+      "type": "answer",
+      "question": "What does a negative influence score (Im\u00e2\u2020\u2019i < 0) indicate in gradient analysis?",
+      "reference": "Destructive interference \u00e2\u20ac\u201d optimizing one task degrades performance of another",
+      "expected_answer_contains": [
+        "destructive",
+        "interference"
+      ]
+    },
+    {
+      "id": "L13_Q44",
+      "type": "answer",
+      "question": "What inference engine does Lychee-FD customize to achieve real-time full-duplex interaction?",
+      "reference": "vLLM",
+      "expected_answer_contains": [
+        "vLLM"
+      ]
+    },
+    {
+      "id": "L13_Q45",
+      "type": "answer",
+      "question": "What is DAG-PP and how does it solve multi-head inference bottlenecks?",
+      "reference": "Directed Acyclic Graph Pipeline Parallelism; uses 1-to-N tensor broadcast via NCCL to execute heads in parallel",
+      "expected_answer_contains": [
+        "DAG-PP",
+        "parallel",
+        "NCCL"
+      ]
+    },
+    {
+      "id": "L13_Q46",
+      "type": "answer",
+      "question": "In Algorithm 1, what primitive is used to broadcast shared hidden states to specialized heads?",
+      "reference": "NCCL_Broadcast",
+      "expected_answer_contains": [
+        "NCCL"
+      ]
+    },
+    {
+      "id": "L14_Q47",
+      "type": "answer",
+      "question": "How many full-duplex dialogue instances comprise the final curated training dataset?",
+      "reference": "Approximately 140K",
+      "expected_answer_contains": [
+        "140K"
+      ]
+    },
+    {
+      "id": "L14_Q48",
+      "type": "answer",
+      "question": "How many distinct speaking styles can the User Agent sample from during data synthesis?",
+      "reference": "19 distinct styles",
+      "expected_answer_contains": [
+        "19"
+      ]
+    },
+    {
+      "id": "L14_Q49",
+      "type": "answer",
+      "question": "Name three interruption motivations modeled in the data synthesis pipeline",
+      "reference": "Correction, Deeper Inquiry, Topic Shift, Strong Emotional Reaction, Impatience (any 3)",
+      "expected_answer_contains": [
+        "Correction",
+        "Inquiry",
+        "Shift",
+        "Emotional",
+        "Impatience"
+      ]
+    },
+    {
+      "id": "L14_Q50",
+      "type": "answer",
+      "question": "What probability is used to inject backchannels during data synthesis post-processing?",
+      "reference": "p = 0.5 (50%)",
+      "expected_answer_contains": [
+        "0.5",
+        "50%",
+        "probability"
+      ]
+    },
+    {
+      "id": "TRAP_T1",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "What is Freeze-Omni's UTMOS speech quality score reported in Figure 4?",
+      "target_entity": "Freeze-Omni",
+      "expects_decline": true,
+      "reference": "Paper does NOT report Freeze-Omni UTMOS score \u00e2\u20ac\u201d Figure 4 only shows Freeze-Omni, Moshi, StepAudio-2, Lychee-FD (Ours), and ablation variant"
+    },
+    {
+      "id": "TRAP_T2",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "What is VITA 1.5's average speech-to-text accuracy in Table 1?",
+      "target_entity": "VITA 1.5",
+      "expects_decline": true,
+      "reference": "Paper does NOT report VITA S\u00e2\u2020\u2019T accuracy in Table 1 \u00e2\u20ac\u201d VITA appears only in other tables"
+    },
+    {
+      "id": "TRAP_T3",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "How many parameters does the baseline model Moshi have?",
+      "target_entity": "Moshi",
+      "expects_decline": true,
+      "reference": "Paper does NOT specify Moshi's parameter count \u00e2\u20ac\u201d focuses on Lychee-FD's ~10B parameters"
+    },
+    {
+      "id": "TRAP_T4",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "What is the exact WER (Word Error Rate) achieved by Lychee-FD on speech-to-text conversion?",
+      "target_entity": "WER metric",
+      "expects_decline": true,
+      "reference": "Paper mentions WER is reported but does NOT provide specific numerical value in main text"
+    },
+    {
+      "id": "TRAP_T5",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "How many open-source datasets were used to train Lychee-FD?",
+      "target_entity": "open-source datasets",
+      "expects_decline": true,
+      "reference": "Paper created SYNTHETIC dataset (140K instances) due to scarcity of open-source full-duplex datasets \u00e2\u20ac\u201d should decline"
+    },
+    {
+      "id": "TRAP_T6",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "What accuracy does the model 'SpeechGPT-5' achieve on LlamaQ benchmark?",
+      "target_entity": "SpeechGPT-5",
+      "expects_decline": true,
+      "reference": "Paper does NOT mention SpeechGPT-5 \u00e2\u20ac\u201d should decline"
+    },
+    {
+      "id": "TRAP_T7",
+      "type": "answer",
+      "fabrication_trap": true,
+      "question": "What is dGSLM's performance improvement over Lychee-FD on the S\u00e2\u2020\u2019S setting?",
+      "target_entity": "dGSLM",
+      "expects_decline": true,
+      "reference": "Paper shows dGSLM achieves only 0.6 (essentially non-functional) \u00e2\u20ac\u201d no improvement over Lychee-FD's 46.2"
+    },
+    {
+      "id": "ENTITY_E1",
+      "type": "answer",
+      "question": "What is Moshi's average S\u00e2\u2020\u2019S accuracy from Table 1?",
+      "reference": "Moshi: 30.5 (NOT Lychee-FD's 46.2)",
+      "expected_answer_contains": [
+        "30.5"
+      ],
+      "note": "Tests whether model confuses Moshi's performance with Lychee-FD's"
+    },
+    {
+      "id": "ENTITY_E2",
+      "type": "answer",
+      "question": "What UTMOS score does Freeze-Omni achieve in Figure 4?",
+      "reference": "Freeze-Omni: 4.21 (NOT Lychee-FD's 4.50)",
+      "expected_answer_contains": [
+        "4.21"
+      ],
+      "note": "Tests entity-specific number attribution"
+    },
+    {
+      "id": "ENTITY_E3",
+      "type": "answer",
+      "question": "In Table 2, what is Fun-Audio-Chat's Success-Replies Rate (SRR)?",
+      "reference": "Paper does NOT show Fun-Audio-Chat in Table 2 \u00e2\u20ac\u201d should decline",
+      "expected_answer_contains": [],
+      "note": "Tests whether model makes up data for missing rows"
+    }
+  ]
+}
