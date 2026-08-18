@@ -81,7 +81,7 @@ _EARLY_STOP_MIN_CHANGE = 0.05  # 5% change threshold
 # Sources that require tool_agent execution before answer generation.
 # Single place to extend when a future source needs pre-answer execution
 # (e.g. "csv_analyzer", "vision").
-_TOOL_EXECUTION_SOURCES = {"web", "tool", "calculator"}
+_TOOL_EXECUTION_SOURCES = {"web", "tool", "calculator", "database"}
 
 
 def build_agent_graph(db=None):
