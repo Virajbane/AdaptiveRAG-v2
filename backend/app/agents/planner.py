@@ -381,6 +381,55 @@ _BARE_WHAT_IS = re.compile(
 )
 _HAS_DIGIT = re.compile(r"\d")
 
+# Document names/titles are the only inexpensive, user-scoped context the
+# planner can safely inspect before it decides whether retrieval is needed.
+# They are deliberately used as a routing signal, never as answer evidence.
+_DOCUMENT_CONTEXT_TOKEN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_DOCUMENT_CONTEXT_STOPWORDS = {
+    "the", "and", "for", "with", "from", "this", "that", "paper",
+    "document", "report", "research", "study", "file", "pdf",
+}
+_MAX_DOCUMENT_CONTEXT_ITEMS = 20
+
+
+def _document_context_matches_question(question: str, document_context: list[str]) -> str | None:
+    """Return a matching user document label when its distinctive tokens occur.
+
+    A single common word (for example, ``report``) is not enough. Requiring
+    two tokens, including one of at least four characters, keeps this a
+    document-identity signal rather than a broad keyword classifier.
+    """
+    question_tokens = set(_DOCUMENT_CONTEXT_TOKEN.findall(question.lower()))
+    for label in document_context:
+        label_tokens = {
+            token for token in _DOCUMENT_CONTEXT_TOKEN.findall(label.lower())
+            if token not in _DOCUMENT_CONTEXT_STOPWORDS
+        }
+        shared = label_tokens.intersection(question_tokens)
+        if len(shared) >= 2 and any(len(token) >= 4 for token in shared):
+            return label
+    return None
+
+
+def _planner_prompt_with_document_context(document_context: list[str]) -> str:
+    """Attach bounded user document names to the LLM routing prompt.
+
+    The names are context for source selection only. They are not document
+    content and must not be treated as answer evidence.
+    """
+    if not document_context:
+        return PLANNER_PROMPT
+
+    labels = "\n".join(f"- {label}" for label in document_context)
+    return (
+        f"{PLANNER_PROMPT}\n\n"
+        "Active user documents (routing context only; not answer evidence):\n"
+        f"{labels}\n"
+        "If a question asks for a specific fact, result, method, or detail "
+        "about one of these active documents, select documents even when it "
+        "does not explicitly say 'paper' or 'document'."
+    )
+
 # Current/live/real-time information intent (STAGE 14 FIX):
 # Signals that the user wants up-to-date data, not stale general knowledge.
 # This catches "current price of Bitcoin" (web) vs "What is Bitcoin?" (direct_llm).
@@ -635,7 +684,9 @@ def _parse_classifier_output(raw: str) -> list[str]:
     return validated
 
 
-def _keyword_fallback_classification(question: str) -> list[str]:
+def _keyword_fallback_classification(
+    question: str, document_context: list[str] | None = None
+) -> list[str]:
     """
     STAGE 11 FIX: Simple keyword-based fallback for when LLM fails.
     
@@ -681,8 +732,7 @@ def _keyword_fallback_classification(question: str) -> list[str]:
         print("[PLANNER] Keyword fallback: detected weather intent → tool")
         return ["tool"]
     
-    action_keywords = ["send", "post", "email", "slack", "message", "alert", "notify", "create event", "set reminder"]
-    if any(kw in q_lower for kw in action_keywords):
+    if _WEATHER_ACTION_INTENT.search(question):
         print("[PLANNER] Keyword fallback: detected action intent → tool")
         return ["tool"]
     
@@ -697,9 +747,8 @@ def _keyword_fallback_classification(question: str) -> list[str]:
     # capital of France"). Explicit calc verbs are kept; a bare "what is"
     # now only counts as a calculator signal when the question also has a
     # math symbol adjacent to a digit.
-    calc_keywords = ["calculate", "solve", "convert", "percentage"]
     if (
-        any(kw in q_lower for kw in calc_keywords)
+        _CALCULATOR_INTENT.search(question)
         or has_nl_arithmetic_intent(question)
     ):
         print("[PLANNER] Keyword fallback: detected calculator intent → calculator")
@@ -716,6 +765,13 @@ def _keyword_fallback_classification(question: str) -> list[str]:
     if any(kw in q_lower for kw in web_keywords):
         print("[PLANNER] Keyword fallback: detected web intent → web")
         return ["web"]
+
+    # If the LLM response was unusable and the user has active documents,
+    # prefer retrieval for an otherwise ambiguous factual question. Explicit
+    # calculator/weather/action/database/web intents have already returned.
+    if document_context:
+        print("[PLANNER] Keyword fallback: active document context → documents")
+        return ["documents"]
 
     # STAGE 12 FIX: direct_llm branch -- general knowledge / definition
     # style questions with no other matching signal. Checked before the
@@ -792,7 +848,37 @@ class PlannerAgent(BaseAgent):
             return doc["metadata"]
         return None
 
-    async def _classify_sources(self, question: str) -> list[str]:
+    async def _get_document_context(self, state: AgentState) -> list[str]:
+        """Return bounded, user-scoped document titles and filenames.
+
+        This intentionally does not retrieve chunks or document content. It
+        gives the planner just enough context to know that an entity can be
+        document-grounded, while keeping answer grounding in RetrieverAgent.
+        """
+        if self.db is None:
+            return []
+
+        try:
+            cursor = self.db.documents.find(
+                {"user_id": state.user_id, "status": "processed"},
+                {"filename": 1, "metadata.title": 1},
+            ).sort("created_at", -1).limit(_MAX_DOCUMENT_CONTEXT_ITEMS)
+            docs = await cursor.to_list(length=_MAX_DOCUMENT_CONTEXT_ITEMS)
+        except Exception as exc:
+            print(f"[PLANNER] Document context lookup failed: {exc!r}")
+            return []
+
+        labels: list[str] = []
+        for doc in docs:
+            metadata = doc.get("metadata") or {}
+            for value in (metadata.get("title"), doc.get("filename")):
+                if isinstance(value, str) and value.strip() and value not in labels:
+                    labels.append(value.strip())
+        return labels
+
+    async def _classify_sources(
+        self, question: str, document_context: list[str] | None = None
+    ) -> list[str]:
         """
         Single-turn LLM classification. One routing decision, then stop.
         No chain-of-thought, per latency requirement.
@@ -803,7 +889,7 @@ class PlannerAgent(BaseAgent):
         """
         try:
             response = await self.llm.acomplete(
-                system=PLANNER_PROMPT,
+                system=_planner_prompt_with_document_context(document_context or []),
                 prompt=question,
                 temperature=0,
                 max_tokens=40,
@@ -1057,6 +1143,7 @@ class PlannerAgent(BaseAgent):
         # Use rewritten_question if available, else fall back to original
         question_to_classify = state.rewritten_question or state.question
         original_question = state.question
+        document_context = await self._get_document_context(state)
 
         # ---- Layer 1: Metadata short-circuit ----
         if _METADATA_Q.search(original_question):
@@ -1087,6 +1174,17 @@ class PlannerAgent(BaseAgent):
         deterministic = self._deterministic_document_routing(question_to_classify)
         if deterministic is not None:
             return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # A verified user-document title/filename match is stronger evidence
+        # than a generic explanation or live-information phrase later in the
+        # deterministic chain. It avoids hard-coding document entities while
+        # preserving normal routing when no user document matches.
+        matched_document = _document_context_matches_question(
+            question_to_classify, document_context
+        )
+        if matched_document:
+            print(f"[PLANNER] Active document context matched: {matched_document!r}")
+            return self._apply_placeholder_check(state, ["documents"], 0.95)
 
         # Database-intent (moved to deterministic for 0.5B)
         deterministic = self._deterministic_database_routing(question_to_classify)
@@ -1120,12 +1218,14 @@ class PlannerAgent(BaseAgent):
             return self._apply_placeholder_check(state, deterministic, 0.9)
 
         # ---- Layer 3: LLM classification (for remaining ambiguous cases) ----
-        sources = await self._classify_sources(question_to_classify)
+        sources = await self._classify_sources(question_to_classify, document_context)
 
         # If LLM failed, try keyword fallback (0.5B safety net)
         if not sources:
             print("[PLANNER] LLM classification returned nothing, trying keyword fallback")
-            sources = _keyword_fallback_classification(question_to_classify)
+            sources = _keyword_fallback_classification(
+                question_to_classify, document_context
+            )
 
         if not sources:
             # Final fallback: assume documents query
