@@ -31,6 +31,7 @@ Test coverage:
 
 Run from backend directory:
   python planner_tool_routing_eval.py --user-id YOUR_USER_ID [--skip-slow]
+   python planner_tool_routing_eval.py --user-id YOUR_USER_ID --planner-only
 
 Output:
   - Console summary with PASS/FAIL per test
@@ -269,6 +270,214 @@ def extract_sources_from_planner_result(result: Any) -> List[str]:
 # ============================================================================
 # Test case definitions
 # ============================================================================
+
+PLANNER_TEST_FILE = "planner_decision_eval_tests.json"
+
+
+def load_planner_decision_tests(path: str = PLANNER_TEST_FILE) -> List[Dict[str, Any]]:
+    """Load the dedicated planner-decision JSON suite."""
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    tests = payload.get("tests", [])
+    if not isinstance(tests, list) or not tests:
+        raise ValueError(f"No planner tests found in {path}")
+
+    normalized = []
+    for case in tests:
+        decision = case.get("expected_planner_decision", {})
+        normalized.append({
+            "id": case["id"],
+            "question": case["question"],
+            "expected_source": decision.get("source"),
+            "expected_tool": decision.get("tool"),
+            "not_expected_sources": case.get("must_not_select", []),
+            "reason": case.get("reason", ""),
+        })
+    return normalized
+
+
+def extract_tool_from_planner_result(result: Any) -> Optional[str]:
+    """Extract the concrete tool from common planner output shapes."""
+    if result is None:
+        return None
+
+    if isinstance(result, str):
+        try:
+            return extract_tool_from_planner_result(json.loads(result))
+        except Exception:
+            pass
+
+        for key in ("tool", "tool_name", "selected_tool", "actual_tool"):
+            match = re.search(
+                rf'"{key}"\s*:\s*"([^"]+)"',
+                result,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return match.group(1)
+        return None
+
+    for key in (
+        "tool",
+        "tool_name",
+        "selected_tool",
+        "selected_tool_name",
+        "actual_tool",
+    ):
+        value = state_get(result, key)
+        if value:
+            return str(value)
+
+    plan = state_get(result, "plan")
+    if plan:
+        return extract_tool_from_planner_result(plan)
+
+    return None
+
+
+def planner_decision_matches(
+    case: Dict[str, Any],
+    actual_sources: List[str],
+    actual_tool: Optional[str],
+) -> Tuple[bool, str]:
+    """Evaluate planner source/tool selection only."""
+    expected_source = case.get("expected_source")
+    expected_tool = case.get("expected_tool")
+    forbidden = set(case.get("not_expected_sources", []))
+    actual_source_set = set(actual_sources)
+
+    if expected_source not in actual_source_set:
+        return (
+            False,
+            f"Expected source={expected_source}, got "
+            f"{sorted(actual_source_set) or 'nothing'}",
+        )
+
+    forbidden_selected = sorted(forbidden.intersection(actual_source_set))
+    if forbidden_selected:
+        return (
+            False,
+            f"Planner incorrectly selected forbidden source(s): "
+            f"{forbidden_selected}",
+        )
+
+    if expected_tool is not None and actual_tool != expected_tool:
+        return (
+            False,
+            f"Expected tool={expected_tool!r}, got {actual_tool!r}",
+        )
+
+    if expected_tool is None and actual_tool not in (None, "", "none", "None"):
+        return (
+            False,
+            f"Expected no concrete tool, got {actual_tool!r}",
+        )
+
+    return True, ""
+
+
+async def test_planner_only(
+    planner: Any,
+    user_id: str,
+    test_cases: List[Dict[str, Any]],
+) -> None:
+    """
+    Pure planner evaluation.
+
+    Question -> Planner -> decision assertion.
+
+    Does NOT invoke the orchestrator, tools, document retrieval, or answer
+    generation. This isolates planner behavior.
+    """
+    print(f"\n{'=' * 100}")
+    print("PLANNER-ONLY EVALUATION")
+    print(f"{'=' * 100}")
+    print(f"Loaded {len(test_cases)} planner decision tests")
+
+    for case in test_cases:
+        test_id = case["id"]
+        question = case["question"]
+        expected_source = case["expected_source"]
+        expected_tool = case.get("expected_tool")
+
+        try:
+            t0 = time.perf_counter()
+
+            planner_state = await invoke_planner(
+                planner,
+                question,
+                user_id=user_id,
+            )
+
+            latency = time.perf_counter() - t0
+
+            actual_sources = extract_sources_from_planner_result(
+                planner_state
+            )
+            actual_tool = extract_tool_from_planner_result(planner_state)
+            rewritten_question = state_get(
+                planner_state,
+                "rewritten_question",
+                question,
+            )
+
+            passed, root_cause = planner_decision_matches(
+                case,
+                actual_sources,
+                actual_tool,
+            )
+
+            record_test(
+                category="Planner Decision",
+                test_id=test_id,
+                question=question,
+                rewritten_question=rewritten_question,
+                expected_source=expected_source,
+                actual_source=(
+                    ", ".join(actual_sources)
+                    if actual_sources
+                    else None
+                ),
+                expected_tool=expected_tool,
+                actual_tool=actual_tool,
+                tool_executed=False,
+                tool_result_present=False,
+                answer_present=False,
+                document_retrieval_executed=False,
+                passed=passed,
+                failure_type="" if passed else "PLANNER",
+                root_cause=root_cause,
+                latency_s=latency,
+            )
+
+            if case.get("reason"):
+                print(f"       Reason:    {case['reason']}")
+
+        except Exception as exc:
+            record_test(
+                category="Planner Decision",
+                test_id=test_id,
+                question=question,
+                rewritten_question=None,
+                expected_source=expected_source,
+                actual_source=None,
+                expected_tool=expected_tool,
+                actual_tool=None,
+                tool_executed=False,
+                tool_result_present=False,
+                answer_present=False,
+                document_retrieval_executed=False,
+                passed=False,
+                failure_type="PLANNER",
+                root_cause=(
+                    f"Planner exception: {exc!r}\n"
+                    f"{traceback.format_exc(limit=2)}"
+                ),
+                latency_s=None,
+            )
+
+
 
 CALCULATOR_TEST_CASES = [
     {
@@ -796,7 +1005,7 @@ def print_summary_report() -> None:
         print(f"  {category:<20}: {stats['passed']}/{stats['total']} passed ({pct:.0f}%)")
 
 
-def save_json_report() -> None:
+def save_json_report(path: str = "planner_tool_routing_results.json") -> None:
     """Save machine-readable JSON report."""
     metrics = compute_metrics()
 
@@ -806,10 +1015,10 @@ def save_json_report() -> None:
         "results": [asdict(r) for r in RESULTS],
     }
 
-    with open("planner_tool_routing_results.json", "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=str)
 
-    print("\n✓ Results saved to: planner_tool_routing_results.json")
+    print(f"\n✓ Results saved to: {path}")
 
 
 # ============================================================================
@@ -825,6 +1034,20 @@ async def main():
         "--skip-slow",
         action="store_true",
         help="Skip slow tests (web search, database)",
+    )
+    parser.add_argument(
+        "--planner-only",
+        action="store_true",
+        help=(
+            "Run only planner decision tests from "
+            "planner_decision_eval_tests.json. No tools, retrieval, "
+            "or answer generation."
+        ),
+    )
+    parser.add_argument(
+        "--planner-test-file",
+        default=PLANNER_TEST_FILE,
+        help="Path to the planner decision JSON test suite.",
     )
     args = parser.parse_args()
 
@@ -858,11 +1081,12 @@ async def main():
     try:
         from app.agents.planner import PlannerAgent
         from app.agents.orchestrator import AgentOrchestrator
+        from app.db.mongodb.client import db
         from app.services.llm.provider import LLMProvider
         from app.config.settings import settings
 
         fast_llm = LLMProvider(model=settings.OLLAMA_FAST_MODEL)
-        planner = PlannerAgent(fast_llm)
+        planner = PlannerAgent(fast_llm, db=db)
         orchestrator = AgentOrchestrator()
 
         print("✓ Components loaded")
@@ -877,17 +1101,48 @@ async def main():
     print("="*80)
 
     try:
-        await test_routing(planner, orchestrator, args.user_id, CALCULATOR_TEST_CASES, "Calculator")
-        await test_routing(planner, orchestrator, args.user_id, WEATHER_TEST_CASES, "Weather")
-        
-        if not args.skip_slow:
-            await test_routing(planner, orchestrator, args.user_id, WEB_TEST_CASES, "Web Search")
-            await test_routing(planner, orchestrator, args.user_id, DATABASE_TEST_CASES, "Database")
+        if args.planner_only:
+            planner_cases = load_planner_decision_tests(
+                args.planner_test_file
+            )
+            await test_planner_only(
+                planner,
+                args.user_id,
+                planner_cases,
+            )
         else:
-            print("\n(Skipping Web and Database tests due to --skip-slow)")
+            # Existing full pipeline evaluation.
+            await test_routing(
+                planner, orchestrator, args.user_id,
+                CALCULATOR_TEST_CASES, "Calculator"
+            )
+            await test_routing(
+                planner, orchestrator, args.user_id,
+                WEATHER_TEST_CASES, "Weather"
+            )
 
-        await test_routing(planner, orchestrator, args.user_id, DIRECT_LLM_TEST_CASES, "Direct LLM")
-        await test_routing(planner, orchestrator, args.user_id, AMBIGUOUS_TEST_CASES, "Ambiguous/Negative")
+            if not args.skip_slow:
+                await test_routing(
+                    planner, orchestrator, args.user_id,
+                    WEB_TEST_CASES, "Web Search"
+                )
+                await test_routing(
+                    planner, orchestrator, args.user_id,
+                    DATABASE_TEST_CASES, "Database"
+                )
+            else:
+                print(
+                    "\n(Skipping Web and Database tests due to --skip-slow)"
+                )
+
+            await test_routing(
+                planner, orchestrator, args.user_id,
+                DIRECT_LLM_TEST_CASES, "Direct LLM"
+            )
+            await test_routing(
+                planner, orchestrator, args.user_id,
+                AMBIGUOUS_TEST_CASES, "Ambiguous/Negative"
+            )
 
     except Exception as exc:
         print(f"\n❌ Test execution failed: {exc}")
@@ -897,7 +1152,11 @@ async def main():
     # Print reports
     print_test_matrix()
     print_summary_report()
-    save_json_report()
+
+    if args.planner_only:
+        save_json_report("planner_decision_results.json")
+    else:
+        save_json_report("planner_tool_routing_results.json")
 
 
 if __name__ == "__main__":
