@@ -340,6 +340,36 @@ _HISTORICAL_INTENT = re.compile(
     re.IGNORECASE,
 )
 
+def _looks_generic_concept(question: str) -> bool:
+    """
+    True if the "What is X" question asks about a generic concept
+    (e.g., "What is vector search?") vs. specific entity
+    (e.g., "What is Lychee-FD?").
+    """
+    # Extract the X from "What is X?"
+    match = re.search(r"what\s+(?:is|are|'s)\s+(.+?)[\?\.]*$", 
+                      question, re.IGNORECASE)
+    if not match:
+        return False
+    
+    entity = match.group(1).strip()
+    
+    # Technical entities have these markers:
+    # - CamelCase or PascalCase (Lychee-FD, DAG-PP, SpeechGPT-5)
+    # - Hyphenated with numbers (GPT-4, DALL-E 2)
+    # - All caps with numbers (BERT, RoBERTa)
+    # - Known research project patterns
+    
+    if re.search(r"[A-Z][a-z]+[A-Z]|[A-Z]+-[A-Z0-9]|\d+[a-zA-Z]", entity):
+        return False  # Looks like a technical entity
+    
+    # Generic concepts are lowercase or simple phrases
+    if entity[0].islower() or entity in ["vector search", "dependency injection", 
+                                         "precision", "recall", "attention"]:
+        return True
+    
+    return False
+
 # Bare "what is X?" / "what's X?" / "what are X?" with no digits, no
 # location preposition, and no other operational signal -- a plain
 # request for a definition/explanation. Deliberately simple: this is
@@ -367,6 +397,7 @@ _CURRENT_LIVE_INTENT = re.compile(
 # Database intent: internal app data queries (moved to deterministic layer for 0.5B)
 _DATABASE_INTENT = re.compile(
     r"(?:"
+    r"(?:how\s+many|total\s+number\s+of|records?|entries?|items?)\s+(?:in\s+)?(?:the\s+)?\w+\s+table\b|"
     # Count/stat queries
     r"how\s+many\s+(?:users?|records?|signups?|registrations?|entries?|items?|customers?|accounts?)\b.*(?:today|this|last|month|week|day|week|month|year).*[?\"]|"
     r"what's\s+the\s+(?:total|sum|count|average|mean)\s+(?:number|count|amount)\s+of\s+(?:users?|records?|signups?|registrations?|entries?)\b|"
@@ -396,7 +427,7 @@ SOURCE_REGISTRY: dict[str, dict] = {
             "counts/stats/records from the app's own database "
             "(SQL/Postgres/MySQL/MongoDB/Redis/Supabase)"
         ),
-        "implemented": False,
+        "implemented": True,
     },
     "tool": {
         "description": (
@@ -656,7 +687,7 @@ def _keyword_fallback_classification(question: str) -> list[str]:
         return ["tool"]
     
     # Document keywords (SECOND PRIORITY)
-    doc_keywords = ["paper", "pdf", "file", "document", "my research", "uploaded", "attached", "according to", "figure", "table", "section"]
+    doc_keywords = ["paper", "pdf", "file", "document", "my research", "uploaded", "attached", "according to", "figure", "section"]
     if any(kw in q_lower for kw in doc_keywords):
         print("[PLANNER] Keyword fallback: detected document intent → documents")
         return ["documents"]
@@ -667,12 +698,8 @@ def _keyword_fallback_classification(question: str) -> list[str]:
     # now only counts as a calculator signal when the question also has a
     # math symbol adjacent to a digit.
     calc_keywords = ["calculate", "solve", "convert", "percentage"]
-    has_math_symbol_with_digit = bool(
-        re.search(r"\d\s*[+\-*/]\s*\d", question) or re.search(r"[+\-*/]\s*\d", question)
-    )
     if (
         any(kw in q_lower for kw in calc_keywords)
-        or has_math_symbol_with_digit
         or has_nl_arithmetic_intent(question)
     ):
         print("[PLANNER] Keyword fallback: detected calculator intent → calculator")
@@ -820,7 +847,6 @@ class PlannerAgent(BaseAgent):
             print(f"[PLANNER] Routed source(s) {placeholder_hits!r} "
                   f"not yet implemented")
             state.sources_needed = placeholder_hits
-            state.tool = None
             state.metadata_answer = {
                 "placeholder": f"{placeholder_hits[0]} integration is under development."
             }
@@ -982,6 +1008,12 @@ class PlannerAgent(BaseAgent):
         If detected, returns ["web"] (high confidence 0.85).
         If not detected, returns None (continue routing).
         """
+        # Don't route to web if question is obviously about document content
+        doc_phrases = ["according to", "paper", "document", "figure", 
+                       "section", "in the", "uploaded", "my research"]
+        if any(p in question.lower() for p in doc_phrases):
+            return None
+
         if _CURRENT_LIVE_INTENT.search(question):
             print(f"[PLANNER] Current/live-information intent detected: "
                   f"{question[:70]}...")
@@ -1013,9 +1045,12 @@ class PlannerAgent(BaseAgent):
                   f"{question[:70]}...")
             return ["direct_llm"]
         if not _HAS_DIGIT.search(question) and _BARE_WHAT_IS.match(question.strip()):
-            print(f"[PLANNER] Bare general-knowledge question detected: "
-                  f"{question[:70]}...")
-            return ["direct_llm"]
+            if _looks_generic_concept(question):
+                print(f"[PLANNER] Bare general-knowledge question detected: "
+                      f"{question[:70]}...")
+                return ["direct_llm"]
+            else:
+                return None
         return None
 
     async def _execute(self, state: AgentState) -> AgentState:
