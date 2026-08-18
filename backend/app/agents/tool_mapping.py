@@ -28,7 +28,7 @@ from typing import Optional
 # is in the question (mirrors tool_agent.py's existing behavior).
 WEATHER_KEYWORDS = re.compile(
     r"\b(weather|temperature|forecast|climate|temp|rain|snow|sunny|cloudy|"
-    r"humid|windy|precipitation)\b|will\s+it\s+(?:rain|snow)",
+    r"humid|wind|windy|precipitation)\b|will\s+it\s+(?:rain|snow)",
     re.IGNORECASE,
 )
 SLACK_EXPLICIT = re.compile(r"\bslack\b", re.IGNORECASE)
@@ -40,11 +40,13 @@ EMAIL_KEYWORDS = re.compile(r"\b(email|e-mail|mail|send)\b", re.IGNORECASE)
 _DIRECT_TOOL_FOR_SOURCE = {
     "calculator": "calculator",
     "web": "web_search",
+    "documents": "document_retrieval",
+    "database": "sql_query",
 }
 
 # Sources with no concrete "tool" in the tool_registry sense -- they're
 # either pure LLM generation or a retrieval path, not a callable tool.
-_NO_CONCRETE_TOOL_SOURCES = {"direct_llm", "documents", "database"}
+_NO_CONCRETE_TOOL_SOURCES = {"direct_llm"}
 
 
 def resolve_sub_tool(question: str) -> str:
