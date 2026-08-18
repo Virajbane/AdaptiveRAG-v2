@@ -83,11 +83,10 @@ class AgentState:
     # ── Planner output ───────────────────────────────────────────────────
     plan: str = ""
     sources_needed: list[str] = field(default_factory=list)  # ["documents", "web"]
-    # Concrete tool name for single-source tool-backed routes, e.g.
-    # "calculator", "weather", "web_search". None for direct_llm/documents/
-    # database, or when multiple sources were selected (no single concrete
-    # tool applies). Set by PlannerAgent via app.agents.tool_mapping so
-    # this can never drift out of sync with what ToolAgent actually runs.
+    # Concrete tool name. Set by tool_mapping.resolve_concrete_tool() to map
+    # source→tool according to contract: documents→document_retrieval,
+    # database→sql_query, calculator→calculator, web→web_search,
+    # tool+weather→weather, direct_llm→None. Never None for implemented sources.
     tool: Optional[str] = None
     confidence: float = 0.0
 
