@@ -144,6 +144,16 @@ class AgentState:
     sources: list[dict] = field(default_factory=list)
     confidence_final: float = 0.0   # blended: rerank score + critic score
 
+    # ── Answer-time evidence trace (internal only) ───────────────────────
+    # Captured after AnswerAgent applies its top-document selection and
+    # context-window budget. This is the exact evidence text shown to the
+    # answer LLM, not the broader retrieved candidate set. It must not be
+    # returned from the public API; evaluation and validation use it to
+    # identify whether a fact was retrieved but never actually prompted.
+    answer_context: str = ""
+    answer_context_docs: list[dict] = field(default_factory=list)
+    answer_context_dropped_docs: list[dict] = field(default_factory=list)
+
     # ── Metadata ─────────────────────────────────────────────────────────
     search_time_ms: float = 0.0
 

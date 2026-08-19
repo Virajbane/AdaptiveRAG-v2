@@ -99,6 +99,16 @@ class CriticAgent(BaseAgent):
         
         This ensures Critic evaluates against what the LLM actually saw.
         """
+        # AnswerAgent records the final prompt evidence only after its
+        # top-document selection and token-budget pass. Prefer it whenever
+        # available: `retrieved_docs` can contain chunks that were never
+        # shown to the answer model and must not influence validation or
+        # retry classification.
+        if state.answer_context:
+            return state.answer_context
+
+        # Fallback for direct CriticAgent unit tests and non-AnswerAgent
+        # paths that have not produced an answer-time trace yet.
         sources_needed = state.sources_needed or []
         context_parts = []
 

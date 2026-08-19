@@ -62,6 +62,7 @@ class AgentOrchestrator:
         user_id: str,
         session_id: str = "default_session",
         knowledge_version: str = "",
+        include_diagnostics: bool = False,
     ) -> dict:
         """
         Process a question through the agent graph.
@@ -80,6 +81,9 @@ class AgentOrchestrator:
                 knowledge updates. If not provided, defaults to empty string.
                 IMPORTANT: Do not invent a version number; only pass if
                 available from the application context.
+            include_diagnostics: Internal evaluation flag. When true, bypasses
+                the query cache and returns retrieval/answer-context trace
+                fields. Never enable this for the public API response.
 
         Returns:
             dict with keys:
@@ -98,14 +102,20 @@ class AgentOrchestrator:
         # Use original question for cache lookup; after graph execution,
         # we'll cache using the canonical (rewritten) form to avoid
         # redundant reruns on differently-phrased queries.
-        cached_result = await query_cache.get(
-            question, user_id, knowledge_version=knowledge_version
-        )
-        print(f"[DEBUG] Cache hit: {cached_result is not None}")
+        if include_diagnostics:
+            # A cached public response contains no internal evidence trace.
+            # Evaluation must execute the graph to observe this invocation.
+            cached_result = None
+            print("[DEBUG] Cache bypassed for diagnostic run")
+        else:
+            cached_result = await query_cache.get(
+                question, user_id, knowledge_version=knowledge_version
+            )
+            print(f"[DEBUG] Cache hit: {cached_result is not None}")
 
-        if cached_result:
-            print("\n[CACHE HIT]")
-            return cached_result
+            if cached_result:
+                print("\n[CACHE HIT]")
+                return cached_result
 
         print(f"\n{'=' * 50}")
         print(f"QUESTION: {question}")
@@ -160,6 +170,13 @@ class AgentOrchestrator:
             "is_valid": final_state.is_valid,
         }
 
+        if include_diagnostics:
+            result["rewritten_question"] = final_state.rewritten_question
+            result["retrieved_docs"] = final_state.retrieved_docs
+            result["answer_context"] = final_state.answer_context
+            result["answer_context_docs"] = final_state.answer_context_docs
+            result["answer_context_dropped_docs"] = final_state.answer_context_dropped_docs
+
         # -----------------------------
         # Cache Result — only if it's a REAL answer
         # -----------------------------
@@ -178,7 +195,7 @@ class AgentOrchestrator:
             and (final_state.confidence_final or 0.0) > 0.0
         )
 
-        if should_cache:
+        if should_cache and not include_diagnostics:
             # Use rewritten_question (canonical form) as cache key; fall back
             # to original question if no rewrite occurred.
             canonical_question = final_state.rewritten_question or question

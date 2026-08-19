@@ -483,6 +483,19 @@ class AnswerAgent(BaseAgent):
         context_parts = [p for p in (doc_context, tool_context) if p]
         context = "\n\n".join(context_parts) if context_parts else "(no context available)"
 
+        # Preserve the evidence boundary after every selection/truncation
+        # decision. `retrieved_docs` remains the broader retrieval result;
+        # these fields represent exactly what the answer LLM can use.
+        # They are internal diagnostics, intentionally kept out of the
+        # public orchestrator response.
+        state.answer_context = context
+        state.answer_context_docs = [dict(doc) for doc in top_docs]
+        state.answer_context_dropped_docs = [
+            dict(block["doc"])
+            for block in dropped_blocks
+            if block["kind"] == "doc" and block["doc"] is not None
+        ]
+
         evidence_desc = []
         if top_docs:
             evidence_desc.append(f"{len(top_docs)} document(s)")
