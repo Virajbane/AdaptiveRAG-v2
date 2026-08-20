@@ -1,0 +1,1716 @@
+{
+  "name": "Planner Decision Evaluation Suite",
+  "version": "1.0",
+  "purpose": "Evaluate only what the Planner decides after receiving a user question. Do not score factual answer quality, retrieval quality, embeddings, BM25, reranking, faithfulness, or hallucination here.",
+  "planner_decision_contract": {
+    "source_values": [
+      "documents",
+      "calculator",
+      "tool",
+      "web",
+      "database",
+      "direct_llm"
+    ],
+    "tool_values": [
+      "document_retrieval",
+      "calculator",
+      "weather",
+      "web_search",
+      "sql_query",
+      null
+    ],
+    "evaluate": [
+      "source selection",
+      "tool selection",
+      "forbidden-source avoidance",
+      "document-vs-non-document isolation",
+      "intent classification"
+    ]
+  },
+  "test_count": 99,
+  "tests": [
+    {
+      "id": "L1_Q1",
+      "question": "What is the core problem that Lychee-FD addresses in full-duplex SLMs?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L1_Q2",
+      "question": "According to the abstract, what are the two key performance improvements Lychee-FD achieves?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L1_Q3",
+      "question": "What is the main limitation of half-duplex systems mentioned in the introduction?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L1_Q4",
+      "question": "What performance drop does Moshi experience after full-duplex alignment?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L2_Q5",
+      "question": "Name the three main paradigms for full-duplex systems discussed in Section 2.2",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L2_Q6",
+      "question": "What is the key difference between Thinker-Talker and Native End-to-End architectures?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L2_Q7",
+      "question": "Which architectures use CDM (Channel-Division Multiplexing) approach?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L3_Q8",
+      "question": "What two gradient-based observations reveal the root cause of modality interference?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L3_Q9",
+      "question": "In Figure 2a, at what layer depth does gradient cosine similarity transition from positive to negative?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L3_Q10",
+      "question": "What frequency mismatch between text and audio is addressed using padding tokens?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L3_Q11",
+      "question": "What does semantic dilution mean in the context of full-duplex SLMs?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L4_Q12",
+      "question": "What is the name of Lychee-FD's backbone model and what is its frame rate for acoustic tokenization?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L4_Q13",
+      "question": "How many Transformer layers comprise the shared backbone in Lychee-FD's architecture?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L4_Q14",
+      "question": "Name the three specialized heads that branch from Lychee-FD's shared backbone in deep layers",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L4_Q15",
+      "question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L4_Q16",
+      "question": "In Equation 6, what does Om represent in the hierarchical parameter separation?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L5_Q17",
+      "question": "What optimizer and learning rate schedule are used to train Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L5_Q18",
+      "question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L5_Q19",
+      "question": "What global batch size and training duration are used?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L5_Q20",
+      "question": "How is the hierarchical architecture configured in terms of layer counts for each head?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L6_Q21",
+      "question": "In Table 1, what is Lychee-FD's average accuracy across both S→T and S→S settings?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L6_Q22",
+      "question": "What is Lychee-FD's takeover rate (TOR) in Table 1, and what does it indicate?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L6_Q23",
+      "question": "In the ablation studies (Table 1), what S→S accuracy does 'w/o Param-Sep' achieve?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L6_Q24",
+      "question": "In the ablation studies (Table 1), what S→T accuracy does 'w/o Sem-Channel' achieve?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L6_Q25",
+      "question": "Compared to Fun-Audio-Chat (previous SOTA), what is Lychee-FD's improvement in S→S accuracy?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L7_Q26",
+      "question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L7_Q27",
+      "question": "In Table 2 FullDuplexBench 1.5, what is Lychee-FD's Interruption-Response Rate (IRR)?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L7_Q28",
+      "question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5 in milliseconds?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L7_Q29",
+      "question": "What improvement does Lychee-FD achieve over Freeze-Omni on FullDuplexBench 1.5?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L7_Q30",
+      "question": "Which metrics are used to evaluate turn-taking and interruption behaviors on FDBench?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L8_Q31",
+      "question": "In Figure 4, what UTMOS score does Lychee-FD achieve for speech synthesis quality?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L8_Q32",
+      "question": "In Figure 4, what UTMOS score does Moshi achieve?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L8_Q33",
+      "question": "In Figure 4, what UTMOS score does the 'w/o Param-Sep' ablation variant achieve?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L8_Q34",
+      "question": "What two metrics are used to evaluate speech generation quality in Section 4.6?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L9_Q35",
+      "question": "In Section 5, which other full-duplex SLM architecture is analyzed for universal gradient conflicts?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L9_Q36",
+      "question": "What does Figure 5 demonstrate about modality interference across different architectures?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L10_Q37",
+      "question": "In Figure 6 (layer ablation), at how many layers does accuracy on LlamaQ saturate?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L10_Q38",
+      "question": "What accuracy does Lychee-FD achieve with 4 separated layers according to Figure 6?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L11_Q39",
+      "question": "In Figure 7 (case study), what two key capabilities does Lychee-FD demonstrate?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L11_Q40",
+      "question": "What is the key limitation identified in Figure 8 regarding side-talk?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L12_Q41",
+      "question": "In Figure 9 (left), what is the global influence score of text on speech in fully shared baseline?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L12_Q42",
+      "question": "In Figure 9 (right), after hierarchical parameter separation, what does the text→speech influence score become?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L12_Q43",
+      "question": "What does a negative influence score (Im→i < 0) indicate in gradient analysis?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L13_Q44",
+      "question": "What inference engine does Lychee-FD customize to achieve real-time full-duplex interaction?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L13_Q45",
+      "question": "What is DAG-PP and how does it solve multi-head inference bottlenecks?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L13_Q46",
+      "question": "In Algorithm 1, what primitive is used to broadcast shared hidden states to specialized heads?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L14_Q47",
+      "question": "How many full-duplex dialogue instances comprise the final curated training dataset?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L14_Q48",
+      "question": "How many distinct speaking styles can the User Agent sample from during data synthesis?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L14_Q49",
+      "question": "Name three interruption motivations modeled in the data synthesis pipeline",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "L14_Q50",
+      "question": "What probability is used to inject backchannels during data synthesis post-processing?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T1",
+      "question": "What is Freeze-Omni's UTMOS speech quality score reported in Figure 4?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T2",
+      "question": "What is VITA 1.5's average speech-to-text accuracy in Table 1?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T3",
+      "question": "How many parameters does the baseline model Moshi have?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T4",
+      "question": "What is the exact WER (Word Error Rate) achieved by Lychee-FD on speech-to-text conversion?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T5",
+      "question": "How many open-source datasets were used to train Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T6",
+      "question": "What accuracy does the model 'SpeechGPT-5' achieve on LlamaQ benchmark?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "TRAP_T7",
+      "question": "What is dGSLM's performance improvement over Lychee-FD on the S→S setting?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "ENTITY_E1",
+      "question": "What is Moshi's average S→S accuracy from Table 1?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "ENTITY_E2",
+      "question": "What UTMOS score does Freeze-Omni achieve in Figure 4?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "ENTITY_E3",
+      "question": "In Table 2, what is Fun-Audio-Chat's Success-Replies Rate (SRR)?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "HALLUC_H1",
+      "question": "Does the paper state that Lychee-FD requires multi-stage training like Thinker-Talker models?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "HALLUC_H2",
+      "question": "Does the paper report that parameter separation introduces additional inference latency overhead?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "DECLINE_D1",
+      "question": "What is the Whisper-v3-large model used for in Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "DECLINE_D2",
+      "question": "What are the three specialized heads in Lychee-FD's hierarchical architecture?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "MULTIHOP_M1",
+      "question": "The paper identifies two root causes of modality interference. What are they and how does Lychee-FD address each?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "MULTIHOP_M2",
+      "question": "How do the ablation results in Table 1 validate the two architectural innovations proposed in the paper?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "MULTIHOP_M3",
+      "question": "Compare Lychee-FD's approach to modality interference with the Thinker-Talker approach. What is the key trade-off?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CACHE_C1",
+      "question": "What backbone model does Lychee-FD use as its half-duplex base?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CACHE_C2",
+      "question": "What three specialized heads branch from the shared backbone in Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CACHE_C3",
+      "question": "In Figure 4, what UTMOS score does Lychee-FD achieve?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "PRECISION_P1",
+      "question": "What is the exact learning rate used in Lychee-FD training?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "PRECISION_P2",
+      "question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "PRECISION_P3",
+      "question": "What frame rate does CosyVoice2 tokenizer use in Lychee-FD?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "KEYWORD_K1",
+      "question": "What two modalities does Lychee-FD try to balance in full-duplex conversation?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "KEYWORD_K2",
+      "question": "What communication primitive is used in DAG-PP for distributing computation?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CROSS_X1",
+      "question": "How does the paper justify why 4 layers of separation is optimal for the hierarchical architecture?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CROSS_X2",
+      "question": "What evidence from Appendix 9 supports the claim that hierarchical parameter separation eliminates destructive interference?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "CROSS_X3",
+      "question": "How do the data synthesis details in Appendix 11 support the claim that Lychee-FD achieves natural interaction?",
+      "expected_planner_decision": {
+        "source": "documents",
+        "tool": "document_retrieval",
+        "decision_type": "source_selection"
+      },
+      "must_not_select": [
+        "calculator",
+        "weather",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Question asks about evidence contained in the Lychee-FD paper; planner should route to the document corpus."
+    },
+    {
+      "id": "PLAN_CALC_01",
+      "question": "What is 2487 * 36 - 1295?",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Pure arithmetic should use the calculator."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_CALC_02",
+      "question": "A store has 480 products and sells 125. How many are left?",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Arithmetic word problem should use the calculator."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_CALC_03",
+      "question": "Convert 72 Fahrenheit to Celsius.",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Unit conversion is deterministic computation."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEATHER_01",
+      "question": "What is the current temperature in Hyderabad?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEATHER_02",
+      "question": "Will it rain in Goa today?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current/future weather requires live weather data."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEATHER_03",
+      "question": "What is the wind speed in Kochi today?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Live weather observation should not be answered from documents."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEB_01",
+      "question": "What are the latest developments in agentic AI this week?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Latest external information requires web search."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEB_02",
+      "question": "What is the current pricing for the OpenAI API?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Current external pricing requires web search."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_WEB_03",
+      "question": "What are the latest AI model releases today?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Time-sensitive external information requires web search."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_DB_01",
+      "question": "How many patient records are currently in the database?",
+      "expected_planner_decision": {
+        "source": "database",
+        "tool": "sql_query",
+        "decision_type": "Question explicitly asks for current database state."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_DB_02",
+      "question": "How many records are stored in the appointments table?",
+      "expected_planner_decision": {
+        "source": "database",
+        "tool": "sql_query",
+        "decision_type": "Question requires database execution."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_DB_03",
+      "question": "How many notifications were created last month?",
+      "expected_planner_decision": {
+        "source": "database",
+        "tool": "sql_query",
+        "decision_type": "Historical database aggregation requires the database tool."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_LLM_01",
+      "question": "What is vector search?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General conceptual knowledge does not require an external source."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_LLM_02",
+      "question": "Explain dependency injection in software engineering.",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General software explanation should use the direct LLM."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_LLM_03",
+      "question": "What is the difference between threads and processes in Python?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General technical explanation does not require retrieval."
+      },
+      "must_not_select": [
+        "documents",
+        "calculator",
+        "weather",
+        "web",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_01",
+      "question": "Convert 30 degrees Celsius to Fahrenheit.",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Temperature unit conversion is calculation, not weather."
+      },
+      "must_not_select": [
+        "weather",
+        "documents",
+        "web",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_02",
+      "question": "What does climate mean?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "Definition of climate is general knowledge, not current weather."
+      },
+      "must_not_select": [
+        "weather",
+        "documents",
+        "web",
+        "calculator",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_03",
+      "question": "How does climate change affect weather patterns?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General explanatory question; no live data requested."
+      },
+      "must_not_select": [
+        "weather",
+        "documents",
+        "web",
+        "calculator",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_04",
+      "question": "What is the history of the Indian space programme?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "Historical/general knowledge question; no current information requested."
+      },
+      "must_not_select": [
+        "web",
+        "documents",
+        "weather",
+        "calculator",
+        "database"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_05",
+      "question": "What's the current temperature in Nagpur?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "The word 'current' makes this a live weather request."
+      },
+      "must_not_select": [
+        "web",
+        "documents",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "PLAN_AMB_06",
+      "question": "What are the latest developments in multimodal AI?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Latest developments require current external information."
+      },
+      "must_not_select": [
+        "direct_llm",
+        "documents",
+        "weather",
+        "calculator",
+        "database"
+      ],
+      "reason": ""
+    }
+  ]
+}

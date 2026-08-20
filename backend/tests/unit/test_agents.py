@@ -44,6 +44,7 @@ Known gaps (documented, not hidden)
 """
 
 import json
+from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -206,6 +207,69 @@ VALID_PLAN_JSON = json.dumps({
 
 
 class TestPlannerAgent:
+    class _Cursor:
+        def __init__(self, docs):
+            self.docs = docs
+
+        def sort(self, *args):
+            return self
+
+        def limit(self, *args):
+            return self
+
+        async def to_list(self, length):
+            return self.docs[:length]
+
+    class _Documents:
+        def __init__(self, docs):
+            self.docs = docs
+
+        def find(self, *args):
+            return TestPlannerAgent._Cursor(self.docs)
+
+    @pytest.mark.asyncio
+    async def test_document_title_match_precedes_explanation_routing(self):
+        llm = MagicMock()
+        llm.acomplete = AsyncMock()
+        db = MagicMock()
+        db.documents = self._Documents([
+            {"filename": "lychee-fd-paper.pdf", "metadata": {
+                "title": "Lychee-FD: Native Full-Duplex Speech Models"
+            }}
+        ])
+        agent = PlannerAgent(llm, db=db)
+
+        result = await agent._execute(make_state(
+            question="What is the core problem that Lychee-FD addresses in full-duplex SLMs?"
+        ))
+
+        assert result.sources_needed == ["documents"]
+        assert result.tool == "document_retrieval"
+        llm.acomplete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_active_document_context_is_sent_to_layer_three_llm(self):
+        llm = MagicMock()
+        llm.acomplete = AsyncMock(return_value=SimpleNamespace(
+            text='{"sources": ["documents"]}'
+        ))
+        db = MagicMock()
+        db.documents = self._Documents([
+            {"filename": "lychee-fd-paper.pdf", "metadata": {
+                "title": "Lychee-FD: Native Full-Duplex Speech Models"
+            }}
+        ])
+        agent = PlannerAgent(llm, db=db)
+
+        result = await agent._execute(make_state(
+            question="What is DAG-PP and how does it solve multi-head inference bottlenecks?"
+        ))
+
+        assert result.sources_needed == ["documents"]
+        system_prompt = llm.acomplete.call_args.kwargs["system"]
+        assert "Active user documents" in system_prompt
+        assert "Lychee-FD" in system_prompt
+
     @pytest.mark.asyncio
     async def test_happy_path_populates_state(self):
         llm = mock_llm(VALID_PLAN_JSON)
@@ -461,6 +525,9 @@ class TestAnswerAgent:
 
         assert result.answer == "RAG stands for Retrieval-Augmented Generation."
         assert len(result.sources) == 1
+        assert "[Source 1]" in result.answer_context
+        assert "RAG context" in result.answer_context
+        assert len(result.answer_context_docs) == 1
         assert result.sources[0]["doc_id"] == "doc-1"
         assert result.error == ""
 

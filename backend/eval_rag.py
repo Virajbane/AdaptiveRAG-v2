@@ -35,7 +35,7 @@ from rag_eval_common import (
     check_ingestion_completeness,
     CacheMetricTracker,
     load_golden_set_v2,  # ← This now filters comments automatically
-    DECLINE_REGEX,
+    is_abstention,
 )
 
 
@@ -174,7 +174,7 @@ async def judge_faithfulness(llm, context: str, answer: str, question: str) -> t
 
 
 async def judge_relevance(llm, question: str, answer: str) -> Optional[float]:
-    if DECLINE_REGEX.search(answer):
+    if is_abstention(answer):
         return 1.0
 
     prompt = RELEVANCE_JUDGE_PROMPT.format(question=question, answer=answer)
@@ -208,11 +208,13 @@ async def run_answer_eval(
     # retrieved = await hybrid_engine.search(query=item["question"], user_id=user_id, top_k=6)
     # context_text = "\n\n".join(r["text"] for r in retrieved)
     # ---- WITH ----
-    actual_retrieved_docs = (
-        state.get("retrieved_docs", []) if isinstance(state, dict)
-        else getattr(state, "retrieved_docs", [])
+    # Grade against the exact evidence passed to AnswerAgent after its
+    # top-document selection and token-budget pass. This is deliberately
+    # different from the broader retrieval candidate set.
+    context_text = (
+        state.get("answer_context", "") if isinstance(state, dict)
+        else getattr(state, "answer_context", "")
     )
-    context_text = "\n\n".join(r["text"] for r in actual_retrieved_docs)
     # ----------------------------------
 
     expected_keywords = item.get("expected_answer_contains", [])
@@ -365,7 +367,12 @@ async def main():
 
     async def PIPELINE_ENTRYPOINT(question: str, user_id: str):
         session_id = f"eval_{uuid.uuid4().hex}"
-        return await _orchestrator.process(question, user_id, session_id=session_id)
+        return await _orchestrator.process(
+            question,
+            user_id,
+            session_id=session_id,
+            include_diagnostics=True,
+        )
 
     # --- 0. Ingestion completeness gate ---------------------------------
     ingestion_report = None

@@ -176,11 +176,28 @@ def context_precision_keyword(retrieved_texts: List[str], expected_keywords: Lis
 # Hallucination trap / abstention correctness
 # ---------------------------------------------------------------------------
 
-DECLINE_REGEX = re.compile(
-    r"\b(do(es)?\s+not|didn'?t|is\s+not|are\s+not|no\s+information|"
-    r"not\s+(available|found|specified|stated|mentioned|provide[d]?))\b",
+# A decline is an abstention about evidence availability, not every negative
+# proposition. For example, "half-duplex systems do not allow simultaneous
+# communication" is a substantive answer (it may still be wrong or
+# ungrounded), whereas "I could not find that in the sources" is a decline.
+_ABSTENTION_REGEX = re.compile(
+    r"\b(?:"
+    r"i\s+(?:do\s+not|don't|cannot|can't)\s+(?:have|find|verify|determine|know)|"
+    r"(?:the\s+)?(?:sources?|document|paper|context|retrieved\s+text)\s+"
+    r"(?:do(?:es)?\s+not|don't|did\s+not|didn't|cannot|can't)\s+"
+    r"(?:contain|provide|specify|state|mention|report|include|show)|"
+    r"(?:not|no)\s+(?:available|information|evidence|relevant\s+(?:information|evidence))|"
+    r"(?:could\s+not|couldn't|unable\s+to|cannot|can't)\s+"
+    r"(?:find|verify|determine|answer)|"
+    r"(?:i\s+am|i'm)\s+(?:uncertain|unsure)"
+    r")\b",
     re.IGNORECASE,
 )
+
+
+def is_abstention(answer_text: str) -> bool:
+    """True only when the answer abstains because evidence is unavailable."""
+    return bool(_ABSTENTION_REGEX.search(answer_text or ""))
 
 
 def score_hallucination_trap(item: Dict[str, Any], answer_text: str) -> Optional[bool]:
@@ -195,7 +212,7 @@ def score_hallucination_trap(item: Dict[str, Any], answer_text: str) -> Optional
     is_trap = item.get("expects_decline") or item.get("id", "").startswith("decline_")
     if not is_trap:
         return None
-    return bool(DECLINE_REGEX.search(answer_text))
+    return is_abstention(answer_text)
 
 
 def score_false_decline(item: Dict[str, Any], answer_text: str) -> Optional[bool]:
@@ -207,7 +224,7 @@ def score_false_decline(item: Dict[str, Any], answer_text: str) -> Optional[bool
     is_trap = item.get("expects_decline") or item.get("id", "").startswith("decline_")
     if is_trap or item.get("type") != "answer":
         return None
-    return bool(DECLINE_REGEX.search(answer_text))
+    return is_abstention(answer_text)
 
 
 # ---------------------------------------------------------------------------
