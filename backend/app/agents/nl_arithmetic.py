@@ -11,6 +11,28 @@ STAGE 14 FIX (2026-08-14):
   Design principle: intent detection remains generic (no hardcoded sentences),
   but expression building now handles the full range of NL arithmetic patterns.
 
+STAGE 15 FIX (2026-08-22, item 6.4):
+  Added "median" to _AVERAGE_WORDS so "Calculate the median of 11, 19, 27,
+  35 and 43" is recognized as arithmetic intent.
+
+STAGE 16 FIX (2026-08-22, item 6.4 correction):
+  The STAGE 15 fix only added "median" as an intent trigger -- it still
+  computed sum(numbers)/len(numbers) for a "median" question, which is
+  mathematically wrong for anything but evenly-spaced inputs (it happened
+  to equal the true median for the test fixture [11,19,27,35,43] only by
+  coincidence). "median" and "average"/"mean" are now split into separate
+  word lists so build_expression() can special-case median: sort the
+  operands and return the true middle value (or the average of the two
+  middle values for an even count), instead of routing it through the
+  same sum/count formula as average.
+
+  eval() in the downstream calculator tool only accepts +-*/ symbols, so
+  "median" can't be expressed as a self-evaluating arithmetic string the
+  way average/sum/etc. can (there's no "sort and pick the middle" infix
+  operator). build_expression() returns a pre-computed numeric literal
+  string for median instead of a formula -- callers that expect a plain
+  evaluable expression still get one, it's just already reduced.
+
 Both the planner (needs a yes/no signal) and the tool agent (needs an
 actual expression string to evaluate) share the same vocabulary here so
 "the planner thinks this is arithmetic" and "the tool agent can build an
@@ -41,7 +63,16 @@ _MULTIPLY_WORDS = re.compile(
 _DIVIDE_WORDS = re.compile(
     r"\b(?:divid(?:e|ed|ing)|split|each|per)\b", re.IGNORECASE
 )
+
+# STAGE 16 FIX (6.4 correction): "median" split out of _AVERAGE_WORDS --
+# it is intent-equivalent (both are "aggregate these numbers" requests)
+# but NOT formula-equivalent, so they can no longer share one code path
+# in build_expression(). _AVERAGE_WORDS keeps its original meaning
+# (mean); _MEDIAN_WORDS is new. _AGGREGATE_WORDS is the union, used only
+# where the two are genuinely interchangeable (coarse intent detection).
 _AVERAGE_WORDS = re.compile(r"\b(?:average|mean)\b", re.IGNORECASE)
+_MEDIAN_WORDS = re.compile(r"\bmedian\b", re.IGNORECASE)
+_AGGREGATE_WORDS = re.compile(r"\b(?:average|mean|median)\b", re.IGNORECASE)
 
 # "removing/subtracting Y from X" -- the base amount (X) comes *after*
 # "from", reversed from left-to-right reading order. Handled as an
@@ -71,7 +102,7 @@ _ANY_OPERATION_WORD = re.compile(
             _ADD_WORDS,
             _MULTIPLY_WORDS,
             _DIVIDE_WORDS,
-            _AVERAGE_WORDS,
+            _AGGREGATE_WORDS,
         )
     ),
     re.IGNORECASE,
@@ -94,6 +125,24 @@ def has_nl_arithmetic_intent(question: str) -> bool:
     return len(numbers) >= 2
 
 
+def _median(values: list[float]) -> float:
+    """True median: middle value of the sorted list, or the average of
+    the two middle values for an even-length list. NOT sum/count."""
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _format_number(value: float) -> str:
+    """Render an int-valued float without a trailing '.0'."""
+    if value == int(value):
+        return str(int(value))
+    return str(value)
+
+
 def build_expression(question: str) -> Optional[str]:
     """
     Build a safe arithmetic expression string from a natural-language
@@ -102,6 +151,7 @@ def build_expression(question: str) -> Optional[str]:
     Examples:
     - "I have 250 items and remove 37" → "250 - 37"
     - "average of 18, 24, 30, 36" → "(18+24+30+36)/4"
+    - "median of 11, 19, 27, 35, 43" → "27" (true median, pre-computed)
     - "18% of 3500" → "3500 * 18 / 100"
     - "divide 1440 by 24 and add 35" → "1440 / 24 + 35"
 
@@ -123,8 +173,20 @@ def build_expression(question: str) -> Optional[str]:
     if m:
         subtrahend, base = m.group(1), m.group(2)
         return f"{base} - {subtrahend}"
-    
-    # ── AVERAGE: "average of 1, 2, 3, 4" → "(1+2+3+4)/4" ──────────────
+
+    # ── MEDIAN: true middle value, NOT sum/count ──────────────────────
+    # STAGE 16 FIX (6.4 correction): checked before _AVERAGE_WORDS so a
+    # "median" question can never fall into the average formula below.
+    # This returns a pre-computed numeric literal (not a formula) because
+    # "sort and take the middle" has no +-*/ infix representation for the
+    # downstream expression evaluator.
+    if _MEDIAN_WORDS.search(question):
+        numbers = _NUMBER.findall(question)
+        if len(numbers) >= 2:
+            return _format_number(_median([float(n) for n in numbers]))
+        return None
+
+    # ── AVERAGE/MEAN: "average of 1, 2, 3, 4" → "(1+2+3+4)/4" ─────────
     if _AVERAGE_WORDS.search(question):
         numbers = _NUMBER.findall(question)
         if len(numbers) >= 2:
