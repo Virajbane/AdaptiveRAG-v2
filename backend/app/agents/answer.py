@@ -75,6 +75,13 @@ def _extract_field_hint(question: str) -> str | None:
 # 2026-08-09 FIX: Each tool result type gets a formatter so AnswerAgent
 # can include calculator/weather/slack/email results, not just web.
 # Returns None for missing/errored results so they're excluded.
+#
+# 2026-08-22 FIX: added a "database" case. Previously this function had
+# no branch for "database" at all, matching the missing "database" check
+# in AnswerAgent._execute below -- a successful database tool result
+# was silently never turned into evidence text, so the answer agent
+# always fell through to "no usable content" even when tool_agent had
+# already found the right answer.
 def _format_tool_result(kind: str, result: dict | None) -> str | None:
     if not result or result.get("error"):
         return None
@@ -105,6 +112,25 @@ def _format_tool_result(kind: str, result: dict | None) -> str | None:
     if kind == "email":
         to_email = result.get("to_email") or "the requested recipient"
         return f"[Email Result] Email was sent to {to_email}."
+
+    if kind == "database":
+        entity = result.get("entity") or "records"
+        query_type = result.get("query_type")
+        count = result.get("count")
+        rows = result.get("rows") or []
+        if query_type == "count":
+            if count is None:
+                return None
+            return f"[Database Result] {entity}: {count} record(s)."
+        if query_type == "latest":
+            if not rows:
+                return None
+            return f"[Database Result] Latest {entity}: {rows[0]}"
+        if query_type == "list":
+            if not rows:
+                return None
+            return f"[Database Result] {entity} ({count} total): {rows}"
+        return None
 
     return None
 
@@ -320,7 +346,8 @@ class AnswerAgent(BaseAgent):
 
         # ── Tool results ─────────────────────────────────────────────
         # Include tool results only if corresponding source was routed to.
-        # "tool" source includes weather, email, slack; "calculator" is its own source.
+        # "tool" source includes weather, email, slack; "calculator" and
+        # "database" are their own sources.
         tool_context_parts = []
         web_result_count = 0
         non_web_tool_used = False
@@ -357,6 +384,21 @@ class AnswerAgent(BaseAgent):
                 if formatted:
                     tool_context_parts.append(formatted)
                     non_web_tool_used = True
+
+        # Database: only if "database" was routed.
+        #
+        # 2026-08-22 FIX: this branch didn't exist before. A successful
+        # database tool result (state.tool_results["database"]) was
+        # produced by tool_agent.py but never read here, so tool_context
+        # stayed empty for every database question and the evidence-
+        # sufficiency gate below always declined with "no usable content"
+        # regardless of whether the query actually succeeded.
+        if "database" in sources_needed:
+            result = state.tool_results.get("database") if state.tool_results else None
+            formatted = _format_tool_result("database", result)
+            if formatted:
+                tool_context_parts.append(formatted)
+                non_web_tool_used = True
 
         # 2026-08-09 FIX: Metadata as evidence. Metadata is treated like
         # retrieved evidence, not as a shortcut bypass. If Planner identified
