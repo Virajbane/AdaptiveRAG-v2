@@ -13,12 +13,26 @@ Root cause this module fixes (AMB_09 / "tool selection accuracy = 0%"):
 This module is the single place that turns:
     source ("calculator" / "tool" / "web" / "database" / "documents" / "direct_llm")
 into:
-    concrete tool name ("calculator" / "weather" | "slack" | "email" / "web_search" / ...)
+    concrete tool name ("calculator" / "weather" | "slack_search" | "slack" | "email" / "web_search" / ...)
 
 so the planner can set state.tool immediately after routing, and
 tool_agent's `_handle_tool` sub-dispatch (weather vs slack vs email) uses
 the exact same keyword detection instead of a second, potentially
 divergent, copy of it.
+
+STAGE 15 FIX (2026-08-22, item 6.6):
+  Added "humidity" to WEATHER_KEYWORDS so "What is the humidity in
+  Visakhapatnam right now?" correctly resolves to "weather" sub-tool
+  instead of generic "tool".
+
+STAGE 16+ FIX (2026-08-22, root cause 6.5):
+  Slack routing now distinguishes search intent ("find/search Slack
+  messages") from post intent ("send/post a Slack message"):
+  - Search intent -> "slack_search"  (backed by SlackTool.search_messages)
+  - Post intent   -> "slack"         (backed by SlackTool.post_message)
+  Previously every Slack question resolved to "slack" regardless of
+  intent, so the eval's expected concrete tool "slack_search" was never
+  reached.
 """
 
 import re
@@ -27,7 +41,7 @@ from typing import Optional
 # Weather takes priority over messaging keywords regardless of what else
 # is in the question (mirrors tool_agent.py's existing behavior).
 WEATHER_KEYWORDS = re.compile(
-    r"\b(weather|temperature|forecast|climate|temp|rain|snow|sunny|cloudy|"
+    r"\b(weather|temperature|forecast|climate|temp|humidity|rain|snow|sunny|cloudy|"
     r"humid|wind|windy|precipitation)\b|will\s+it\s+(?:rain|snow)",
     re.IGNORECASE,
 )
@@ -49,15 +63,40 @@ _DIRECT_TOOL_FOR_SOURCE = {
 _NO_CONCRETE_TOOL_SOURCES = {"direct_llm"}
 
 
+# Slack SEARCH signals: find/search/what did/what was/discussions/mention/
+# conversation/messages -- the user wants to READ Slack history, not post.
+# Checked BEFORE the generic SLACK_KEYWORDS so that questions like
+# "Find Slack messages about X" go to slack_search, not slack (post).
+SLACK_SEARCH_KEYWORDS = re.compile(
+    r"\b(?:"
+    r"find|search|look\s+for|what\s+did|what\s+was|who\s+said|did\s+anyone|"
+    r"discuss(?:ion|ions|ed)?|mention(?:ed|s)?|conversation|messages?|thread|threads|"
+    r"said|talked?|brought\s+up"
+    r")\b",
+    re.IGNORECASE,
+)
+# Slack POST signals: send/post/write/notify/alert -- the user wants to WRITE.
+SLACK_POST_KEYWORDS = re.compile(
+    r"\b(?:send|post|write|compose|notify|alert|dm|message|ping)\b",
+    re.IGNORECASE,
+)
+
+
 def resolve_sub_tool(question: str) -> str:
     """
     For the generic "tool" source, work out which concrete integration
-    (weather / slack / email) the question actually wants.
+    (weather / slack_search / slack / email) the question actually wants.
 
-    Same precedence tool_agent.ToolAgent._handle_tool uses: weather
-    first (it never collides with messaging keywords), then whichever
-    product is named explicitly, then generic keyword fallback, then
-    "tool" itself if nothing more specific is found.
+    Precedence:
+      1. Weather (never collides with messaging keywords)
+      2. Slack -- search vs post discrimination:
+         - search keywords AND \bslack\b  -> "slack_search"
+         - post  keywords AND \bslack\b   -> "slack"
+         - \bslack\b alone (no clear verb) -> "slack_search" (read > write
+           as the safer default for ambiguous Slack questions)
+      3. Email
+      4. Generic keyword fallback
+      5. "tool" if nothing more specific
     """
     q = question.lower()
 
@@ -68,7 +107,21 @@ def resolve_sub_tool(question: str) -> str:
     email_named = bool(EMAIL_EXPLICIT.search(q))
 
     if slack_named and not email_named:
-        return "slack"
+        # Distinguish search vs posting for Slack.
+        # 2026-08-22 STAGE 16+: previously always returned "slack", which
+        # was correct for posting but wrong for searching.  Now:
+        #   search-intent -> "slack_search"
+        #   post-intent   -> "slack"
+        #   ambiguous     -> "slack_search" (reading is the safer default)
+        has_search = bool(SLACK_SEARCH_KEYWORDS.search(q))
+        has_post = bool(SLACK_POST_KEYWORDS.search(q))
+        if has_search and not has_post:
+            return "slack_search"
+        if has_post and not has_search:
+            return "slack"
+        # Both or neither: default to search (read-only is safer)
+        return "slack_search"
+
     if email_named and not slack_named:
         return "email"
     if slack_named and email_named:
