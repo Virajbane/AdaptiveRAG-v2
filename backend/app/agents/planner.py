@@ -7,6 +7,34 @@ from app.agents.state import AgentState
 from app.agents.nl_arithmetic import has_nl_arithmetic_intent
 from app.agents.tool_mapping import resolve_concrete_tool
 
+# STAGE 15 FIXES (2026-08-22):
+#   6.1: Broadened hyphenated technical entity detection (Lychee-FD, Thinker-Talker)
+#   6.3: Loosened calculator regex to accept periods (not just ? or ")
+#   6.7: Added "collection" to database scope-word list (MongoDB terminology)
+#
+# STAGE 16 FIXES (2026-08-22 -- new root causes 8, 9, 10):
+#   8: Added common paper-section names ("introduction", "conclusion",
+#      "methodology", "related work") to _DOCUMENT_INTENT's section-word
+#      list. Deliberately NOT adding "background"/"discussion" -- those
+#      are common enough in plain English ("what's the background on the
+#      2008 crisis?") that adding them risks new false positives with no
+#      eval coverage on the false-positive side. Revisit if a real
+#      failing case shows up.
+#   9: Added a general bare-"how does X <verb-phrase>" pattern (not just
+#      "...work") to the explanation-intent layer, gated by the same
+#      technical-entity check used for "what is X" (now factored out as
+#      _TECHNICAL_ENTITY_MARKERS) so it defers instead of asserting
+#      direct_llm when X looks like a specific named entity (e.g.
+#      "Lychee-FD"). NOTE: this inherits the same blind spot as 6.2 --
+#      a bare ALLCAPS acronym with no hyphen (e.g. "BERT") does not
+#      match _TECHNICAL_ENTITY_MARKERS, so "How does BERT process input
+#      sequences?" will currently be treated as a generic explanation
+#      question rather than deferred as a possible document question.
+#      Fixing 6.2's acronym-detection gap fixes this for free; until
+#      then, this is a known, accepted gap, not a hidden one.
+#   10: Added "who (invented|discovered|founded|created) X" to
+#       _HISTORICAL_INTENT.
+
 # --------------------------------------------------------------------------
 # ROUTING HISTORY (read before modifying)
 #
@@ -79,6 +107,28 @@ from app.agents.tool_mapping import resolve_concrete_tool
 #        direct_llm-shaped questions like "what is the capital of
 #        France") to require an actual math symbol + digit.
 #
+# v7 (2026-08-22 -- database routing generalization, root-cause chain
+#   for "how many pdf are there in database"-style questions):
+#   Live production log showed the rewritten question "What is the
+#   total number of PDF files in your database?" being confidently
+#   classified as direct_llm by _deterministic_explanation_routing's
+#   bare-"what is" shortcut, never reaching the database layer's LLM/
+#   keyword fallback at all. Traced to two compounding gaps:
+#     1. _DATABASE_INTENT required either the literal word "table", the
+#        contraction "what's" (not "what is"), or one of a fixed noun
+#        list (users/records/signups/registrations/entries) that didn't
+#        include documents/pdfs/files/sessions/etc. -- so a real
+#        database question with different phrasing fell all the way
+#        through Layer 2 unmatched.
+#     2. _deterministic_explanation_routing's bare-what-is fallback had
+#        no awareness that the "generic concept" it was about to assert
+#        direct_llm for might explicitly be OUR OWN database/app data
+#        -- it only checked for PascalCase/hyphen-digit "technical
+#        entity" markers, nothing about the database/storage domain.
+#   Fixed additively (see _DATABASE_INTENT and
+#   _deterministic_explanation_routing below) without touching the
+#   existing narrower patterns, which stay exactly as they were.
+#
 # SOURCE_REGISTRY is the intended single source of truth for the
 # classifier prompt AND for what tool_agent.py / graph.py treat as
 # valid. The import-time assertion below will fail fast if the prompt
@@ -112,6 +162,18 @@ _PERSONAL_CONTENT = re.compile(
 )
 
 # Document-intent: comprehensive patterns for research paper/figure/table queries
+#
+# STAGE 16 FIX (root cause 8, 2026-08-22): the "in the <section>" branch
+# below only recognized paper/document/pdf/file/abstract/publication/
+# section/appendix/figure/table -- not common named sections like
+# "introduction", "conclusion", "methodology", or "related work", so
+# "What does the paper say in the introduction?"-shaped questions with
+# the section named explicitly missed this pattern. Added those four.
+# Deliberately NOT adding "background" or "discussion" here -- both are
+# common enough in ordinary non-document English (e.g. "what's the
+# background on the 2008 financial crisis?", "what's the discussion
+# around AI regulation?") that adding them risks new false-positive
+# document routing with no eval case covering that direction yet.
 _DOCUMENT_INTENT = re.compile(
     r"(?:"
     # Explicit document-referencing phrases. Allows a possessive/topic
@@ -121,7 +183,8 @@ _DOCUMENT_INTENT = re.compile(
     # multi-source routing in STAGE 12.
     r"according\s+to\s+(?:the\s+|my\s+|our\s+)?(?:\w+\s+){0,2}(?:paper|document|pdf|file|abstract|publication|study|research|report)\b|"
     r"(?:my|our)\s+uploaded\s+(?:paper|pdf|file|document|research|data)\b|"
-    r"in\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|section|appendix|figure|table|table\s+of\s+contents)\b|"
+    r"in\s+(?:the\s+)?(?:paper|document|pdf|file|abstract|publication|section|appendix|figure|table|"
+    r"introduction|conclusion|methodology|related\s+work|table\s+of\s+contents)\b|"
     # Query about what document says/reports/shows
     r"(?:what\s+(?:is|does|did)|what's|list)\s+(?:reported|mentioned|described|stated|shown|found|demonstrated|proposed|suggested)\s+in\b|"
     r"(?:what|which|where)\s+(?:is|are|does|did)\s+(?:reported|mentioned|in)\s+(?:the\s+)?(?:paper|document|pdf|file|study)\b|"
@@ -155,6 +218,11 @@ _DOCUMENT_INTENT = re.compile(
 # symbolic-math case it was meant to catch (digit-operator-digit), and
 # additionally requires digits adjacent to the operator, so a stray
 # hyphen in an ordinary word can never match it.
+#
+# STAGE 15 FIX 6.3 (2026-08-22): Loosened `.*[?\"]` to `.*[?\".]?` on
+# percentage and unit-conversion branches so questions ending in periods
+# (e.g. "Calculate 23% of 960.") are accepted, not just those ending in
+# question marks or quotes.
 _CALCULATOR_INTENT = re.compile(
     r"(?:"
     # Arithmetic operations (operator MUST be adjacent to digits on both
@@ -163,12 +231,12 @@ _CALCULATOR_INTENT = re.compile(
     r"\d+\s*(?:\+|-|\*|/|÷|×)\s*\d+|"
     # Explicit calculator keywords
     r"(?:what's?|calculate|compute|solve|find|simplify)\s+.+[0-9].+[?\"]|"
-    # Percentage/ratio
-    r"(?:percentage|percent|%|ratio|proportion)\s+(?:of|between|among).*[?\"]|"
-    r"what\s+(?:is|'s)\s+.+%\s+(?:of|increase|decrease).*[?\"]|"
-    r"how\s+much\s+is\s+.+%\s+of\s+\d+.*[?\"]|"
-    # Unit conversions
-    r"convert\s+.+(?:to|into|in\s+terms\s+of)\s+.+[?\"]|"
+    # Percentage/ratio (STAGE 15 FIX 6.3: changed [?\" ] to [?\".]? )
+    r"(?:percentage|percent|%|ratio|proportion)\s+(?:of|between|among).*[?\".]?|"
+    r"what\s+(?:is|'s)\s+.+%\s+(?:of|increase|decrease).*[?\".]?|"
+    r"how\s+much\s+is\s+.+%\s+of\s+\d+.*[?\".]?|"
+    # Unit conversions (STAGE 15 FIX 6.3: changed [?\" ] to [?\".]? )
+    r"convert\s+.+(?:to|into|in\s+terms\s+of)\s+.+[?\".]?|"
     r"how\s+many\s+(?:meters|feet|pounds|kilograms|celsius|fahrenheit|miles|kilometers|liters|gallons)\b|"
     r"what\s+is\s+.+\s+in\s+(?:meters|feet|pounds|kilograms|celsius|fahrenheit|miles|kilometers)\b|"
     # Powers, roots, logarithms
@@ -281,13 +349,57 @@ _MULTI_SOURCE_EXTERNAL_REF = re.compile(
     re.IGNORECASE,
 )
 
+# Slack message-search intent: the user wants to READ Slack history.
+#
+# 2026-08-22 STAGE 16+ FIX (root cause 6.5): This MUST be defined and
+# checked BEFORE _WEB_INTENT because Slack questions commonly contain
+# recency keywords ("Find *recent* Slack messages...", "...latest API
+# bug in Slack") that _WEB_INTENT's first branch would otherwise capture
+# first, misrouting the question to web/web_search.
+#
+# Discrimination criteria:
+#   REQUIRED: \bslack\b somewhere in the question.
+#   SEARCH:   find/search/what did/mention/discussion/messages/conversation
+#             or any information-retrieval verb -- user wants to read history.
+#   POST:     send/post/write/notify/alert -- user wants to write.
+# If both or neither, the search interpretation is preferred (read-only is
+# the safer default; accidental reads are less damaging than accidental posts).
+_SLACK_SEARCH_INTENT = re.compile(
+    r"(?:"
+    # Explicit Slack mention + information-retrieval verb
+    r"\bslack\b.*\b(?:find|search|look\s+for|what\s+did|what\s+was|who\s+said|"
+    r"discuss(?:ion|ions|ed)?|mention(?:ed|s)?|conversation|messages?|thread|threads|"
+    r"said|talked?|brought\s+up|did\s+anyone)\b|"
+    # Reversed order: retrieval verb first, then slack
+    r"\b(?:find|search|look\s+for|what\s+did|what\s+was|who\s+said|did\s+anyone|"
+    r"discuss(?:ion|ions|ed)?|mention(?:ed|s)?)\b.*\bslack\b"
+    r")",
+    re.IGNORECASE,
+)
+
 # Web-intent: current/live/external information requiring search
+#
+# 2026-08-22 STAGE 16+ FIX (PLAN_WEB_02, PLAN_WEB_05): extended with two
+# new temporal alternatives:
+#   - "(released|launched|published|announced) recently/this week/this month"
+#     catches "Which new foundation models were released recently?"
+#   - "changed recently" / "(changed|updated|evolved) recently in"
+#     catches "What changed recently in the LangGraph ecosystem?"
+# These were previously deferred to the LLM because they didn't match any
+# of the existing noun-adjacent patterns (which required the temporal word
+# to come BEFORE a specific content noun, not after a past-tense verb).
 _WEB_INTENT = re.compile(
     r"(?:"
     # Temporal keywords indicating recency
     r"(?:latest|current|recent|newest|breaking|today|this\s+week|this\s+month|2024|2025|2026)\b.*(?:news|developments?|events?|results?|updates?|benchmarks?|papers?|research|findings?|techniques?|methods?|approaches?|advances?|trends?|tools?|models?)|"
     r"what's?\s+(?:new|happening|going\s+on|the\s+latest|trending)\b|"
     r"(?:what|what's|find|search)\s+(?:the\s+)?(?:latest|current|recent)\s+(?:news|developments?|events?|updates?|benchmarks?|papers?|research|findings?|techniques?|methods?|approaches?|advances?|trends?|tools?|models?)\b|"
+    # Released/launched/published recently -- PLAN_WEB_02 fix
+    r"(?:released|launched|published|announced)\s+(?:recently|this\s+week|this\s+month|lately)\b|"
+    r"(?:recently|lately)\s+(?:released|launched|published|announced)\b|"
+    # Changed/updated recently -- PLAN_WEB_05 fix
+    r"(?:what\s+changed|what's\s+changed|changed|updated|evolved)\s+(?:recently|lately|this\s+week|this\s+month)\b|"
+    r"(?:recently|lately)\s+(?:changed|updated|evolved)\b|"
     # GitHub/public repository search
     r"(?:github|gitlab|bitbucket|repository|repo|source\s+code)\s+.*(?:search|find|look\s+for|show)\b|"
     r"(?:search|find|show|look\s+for)\s+.*(?:on\s+github|repository|repo|on\s+(?:github|gitlab|bitbucket))\b|"
@@ -322,29 +434,101 @@ _WEB_INTENT = re.compile(
 # =============================================================================
 
 # Explicit "please explain this concept" phrasing.
+#
+# STAGE 16 FIX (found while validating root cause 9, 2026-08-22): the
+# "how does X work" alternative used to live here, UNGATED -- it fired
+# on any question of that shape regardless of what X was, including a
+# specific named entity ("How does Lychee-FD work?", "How does the
+# Thinker-Talker architecture work?"), which would have misrouted those
+# to direct_llm exactly like the bug fixed for root cause 9 below. That
+# alternative is removed from here and folded into the new gated
+# _BARE_HOW_DOES check instead (which matches "how does X work" too --
+# it isn't restricted to non-"work" verb phrases, just broader than
+# "work" alone) so EVERY "how does X ..." shape, "work" included, goes
+# through the same _TECHNICAL_ENTITY_MARKERS gate before asserting
+# direct_llm.
 _EXPLANATION_MARKER = re.compile(
     r"^\s*explain\b|"
-    r"\bhow\s+(?:does|do)\s+.+\s+work\b|"
     r"\bwhat\s+(?:does|is)\s+.+\s+mean\b|"
     r"\b(?:definition|meaning)\s+of\b|"
     r"\bwhat\s+is\s+the\s+\w+\s+concept\b",
     re.IGNORECASE,
 )
 
+# STAGE 16 ADDITION (root cause 9, 2026-08-22): a general "how does X
+# <verb-phrase>" pattern, NOT restricted to ending in the word "work"
+# the way _EXPLANATION_MARKER's existing how-does branch is. This is
+# checked separately (not folded into _EXPLANATION_MARKER) because it
+# needs its own entity gate -- see _TECHNICAL_ENTITY_MARKERS and
+# _deterministic_explanation_routing below -- to avoid swallowing
+# genuine document questions like "How does Lychee-FD achieve real-time
+# interaction?".
+_BARE_HOW_DOES = re.compile(
+    r"^\s*how\s+(?:does|do)\s+\S.*\S\s*\??\s*$",
+    re.IGNORECASE,
+)
+
 # General knowledge / historical framing, as opposed to a request for
 # current/recent information (which _WEB_INTENT already catches first).
+#
+# STAGE 16 FIX (root cause 10, 2026-08-22): added a standalone
+# "who (invented|discovered|founded|created) X" alternative. The
+# existing "when was X founded/established/..." pattern required the
+# question to be phrased with "when was", so "Who invented the World
+# Wide Web?" (a "who", not a "when") fell through unmatched.
 _HISTORICAL_INTENT = re.compile(
     r"\bhistorically\b|\bhistory\s+of\b|\bhistorical(?:ly)?\b|"
     r"\bwhen\s+was\s+.+\s+(?:founded|established|built|invented|created)\b|"
+    r"\bwho\s+(?:invented|discovered|founded|created)\b|"
     r"\borigin(?:s|ated)?\s+of\b",
     re.IGNORECASE,
 )
+
+# 2026-08-22 ADDITION: signals that a bare "what is X" question is
+# actually about OUR OWN application data/database, not a request for a
+# dictionary-style definition. See v7 note at top of file. Deliberately
+# narrow -- only fires on explicit database/storage-scope wording, never
+# on a bare entity name like "users"/"documents"/"pdf" alone, since
+# those alone are still legitimately conceptual ("What is a PDF?" stays
+# direct_llm). Verified: "What is a database?" is caught by this guard
+# (so its explanation is decided by Layer 3, not this shortcut) but
+# still ends up routed to direct_llm there via the existing
+# direct_llm_keywords check in _keyword_fallback_classification -- so
+# genuinely conceptual "what is a database?" is unaffected end-to-end.
+_APP_DATA_SCOPE_TERMS = re.compile(
+    r"\b(?:database|db\b|our\s+system|our\s+app|internal\s+data|stored|recorded)\b",
+    re.IGNORECASE,
+)
+
+# STAGE 16 REFACTOR (2026-08-22): factored the "does this span look like
+# a specific named technical entity" check out of _looks_generic_concept
+# into a standalone, reusable regex so root cause 9's new bare-"how does"
+# pattern can share the exact same entity gate as the existing bare-
+# "what is" shortcut, instead of duplicating (and risking drifting from)
+# the pattern. Behavior for _looks_generic_concept is unchanged -- this
+# is a pure extraction, not a logic change.
+_TECHNICAL_ENTITY_MARKERS = re.compile(
+    r"[A-Z][a-z]+[A-Z]|"           # CamelCase/PascalCase (SpeechGPT)
+    r"[A-Z]+-[A-Z0-9]|"            # ALLCAPS-hyphen (GPT-4)
+    r"[A-Z][a-z]+-[A-Z]{2,}|"      # Titlecase-hyphen-ALLCAPS (Lychee-FD)
+    r"[A-Z][a-z]+-[A-Z][a-z]+|"    # Titlecase-hyphen-Titlecase (Thinker-Talker)
+    r"\d+[a-zA-Z]"                  # digit-then-letter (4x)
+)
+
 
 def _looks_generic_concept(question: str) -> bool:
     """
     True if the "What is X" question asks about a generic concept
     (e.g., "What is vector search?") vs. specific entity
     (e.g., "What is Lychee-FD?").
+    
+    STAGE 15 FIX 6.1 (2026-08-22): Broadened regex to recognize
+    hyphenated technical entities like Lychee-FD and Thinker-Talker
+    that were previously misidentified as generic concepts.
+
+    STAGE 16 REFACTOR (2026-08-22): entity-marker regex now lives in
+    the shared _TECHNICAL_ENTITY_MARKERS constant (see above); this
+    function's behavior is unchanged.
     """
     # Extract the X from "What is X?"
     match = re.search(r"what\s+(?:is|are|'s)\s+(.+?)[\?\.]*$", 
@@ -355,12 +539,12 @@ def _looks_generic_concept(question: str) -> bool:
     entity = match.group(1).strip()
     
     # Technical entities have these markers:
-    # - CamelCase or PascalCase (Lychee-FD, DAG-PP, SpeechGPT-5)
+    # - CamelCase or PascalCase (SpeechGPT, AlexNet)
     # - Hyphenated with numbers (GPT-4, DALL-E 2)
-    # - All caps with numbers (BERT, RoBERTa)
-    # - Known research project patterns
-    
-    if re.search(r"[A-Z][a-z]+[A-Z]|[A-Z]+-[A-Z0-9]|\d+[a-zA-Z]", entity):
+    # - Titlecase-hyphen-ALLCAPS (Lychee-FD)
+    # - Titlecase-hyphen-Titlecase (Thinker-Talker)
+    # - digit-then-letter (4x)
+    if _TECHNICAL_ENTITY_MARKERS.search(entity):
         return False  # Looks like a technical entity
     
     # Generic concepts are lowercase or simple phrases
@@ -444,6 +628,20 @@ _CURRENT_LIVE_INTENT = re.compile(
 )
 
 # Database intent: internal app data queries (moved to deterministic layer for 0.5B)
+#
+# 2026-08-22 FIX (v7 note above): added two new order-independent
+# alternatives at the end. The original alternatives above are
+# UNCHANGED -- these are pure additions. They deliberately still
+# require either an explicit database/system scope word or a
+# storage-state word ("stored"/"recorded"), not just a count-phrase +
+# entity alone, because entity+count alone collides with genuinely
+# document-scoped questions like "how many pages does the pdf have?"
+# (singular "the pdf" = an uploaded document, not a database count).
+# Verified against 9 positive and 5 negative/collision cases before
+# finalizing this pattern.
+#
+# STAGE 15 FIX 6.7 (2026-08-22): Added "collection" to database scope
+# words (MongoDB terminology for table).
 _DATABASE_INTENT = re.compile(
     r"(?:"
     r"(?:how\s+many|total\s+number\s+of|records?|entries?|items?)\s+(?:in\s+)?(?:the\s+)?\w+\s+table\b|"
@@ -452,7 +650,21 @@ _DATABASE_INTENT = re.compile(
     r"what's\s+the\s+(?:total|sum|count|average|mean)\s+(?:number|count|amount)\s+of\s+(?:users?|records?|signups?|registrations?|entries?)\b|"
     r"how\s+many\s+.+(?:created|added|registered|signed\s+up)\s+(?:in|last|this|today|this\s+week)\b|"
     r"(?:count|get\s+the\s+count)\s+of\s+(?:users?|records?|entries?)\b.*(?:in|from)\s+(?:the\s+)?(?:database|app|system)\b|"
-    r"(?:database|app|internal\s+data|our\s+system).*(?:says|shows?|has|contains)\s+(?:how\s+many|what|total)\b"
+    r"(?:database|app|internal\s+data|our\s+system).*(?:says|shows?|has|contains)\s+(?:how\s+many|what|total)\b|"
+    # NEW: count-phrase + known entity + explicit database/system scope,
+    # anywhere in the question (order-independent). Catches phrasing
+    # like "What is the total number of PDF files in your database?"
+    # that the narrower patterns above miss (no "table", no "what's",
+    # entity not in the original fixed noun list).
+    # STAGE 15 FIX 6.7: Added "collection" to scope-words list
+    r"(?=.*\b(?:how\s+many|total\s+(?:number|count)\s+of|number\s+of|count\s+of)\b)"
+    r"(?=.*\b(?:users?|accounts?|documents?|pdfs?|files?|uploads?|records?|sessions?|chats?|conversations?)\b)"
+    r"(?=.*\b(?:database|db|collection|our\s+system|our\s+app|your\s+database|the\s+database|internal\s+data)\b).*|"
+    # NEW: known entity + storage-state word ("stored"/"recorded") --
+    # covers "how many documents are stored", "documents recorded",
+    # without necessarily saying the word "database".
+    r"\b(?:users?|accounts?|documents?|pdfs?|files?|uploads?|records?|sessions?|chats?|conversations?)\b"
+    r".{0,40}?\b(?:stored|recorded)\b"
     r")",
     re.IGNORECASE
 )
@@ -706,6 +918,15 @@ def _keyword_fallback_classification(
         keywords silently fell through to the "documents" default, even
         for plain general-knowledge questions with no document, tool, or
         database signal at all.
+
+    2026-08-22 FIX: added an early count+entity check (see below) BEFORE
+    the doc_keywords check. Previously, a count-style database question
+    that also happened to mention "pdf"/"file"/"document" (e.g. "how
+    many pdf are there") would be caught by the broader doc_keywords
+    branch first and misrouted to document retrieval instead of a
+    database count -- doc_keywords matches on bare substring presence
+    with no awareness that "how many ... pdf" is a count intent, not a
+    "look inside this document" intent.
     """
     q_lower = question.lower()
 
@@ -735,7 +956,23 @@ def _keyword_fallback_classification(
     if _WEATHER_ACTION_INTENT.search(question):
         print("[PLANNER] Keyword fallback: detected action intent → tool")
         return ["tool"]
-    
+
+    # 2026-08-22 FIX: count-style database question, checked BEFORE
+    # doc_keywords below so "how many pdf/file/document are there" isn't
+    # stolen by the broader (bare substring) document check.
+    _count_re = re.compile(
+        r"\b(?:how\s+many|total(?:\s+number)?\s+of|count\s+of|number\s+of)\b",
+        re.IGNORECASE,
+    )
+    _count_entity_re = re.compile(
+        r"\b(?:users?|accounts?|documents?|pdfs?|files?|uploads?|records?|"
+        r"sessions?|chats?|conversations?)\b",
+        re.IGNORECASE,
+    )
+    if _count_re.search(question) and _count_entity_re.search(question):
+        print("[PLANNER] Keyword fallback: detected count-style database intent → database")
+        return ["database"]
+
     # Document keywords (SECOND PRIORITY)
     doc_keywords = ["paper", "pdf", "file", "document", "my research", "uploaded", "attached", "according to", "figure", "section"]
     if any(kw in q_lower for kw in doc_keywords):
@@ -755,7 +992,7 @@ def _keyword_fallback_classification(
         return ["calculator"]
     
     # Database keywords
-    db_keywords = ["how many users", "how many records", "total", "database", "signed up", "users", "records"]
+    db_keywords = ["how many users", "how many records", "total", "database", "signed up", "users", "records", "collection"]
     if any(kw in q_lower for kw in db_keywords):
         print("[PLANNER] Keyword fallback: detected database intent → database")
         return ["database"]
@@ -831,6 +1068,37 @@ class PlannerAgent(BaseAgent):
       matches now go through the SAME placeholder-source check
       (_apply_placeholder_check), so a not-yet-implemented source is
       handled identically no matter which layer classified it.
+
+    2026-08-22 CHANGES (v7):
+    - _DATABASE_INTENT broadened with two order-independent alternatives
+      (count-phrase + entity + scope word; entity + stored/recorded) so
+      phrasing outside the original fixed patterns is still caught
+      deterministically.
+    - _deterministic_explanation_routing's bare-"what is" shortcut now
+      defers (returns None) when the question explicitly mentions our
+      own database/app/storage, instead of confidently asserting
+      direct_llm -- see _APP_DATA_SCOPE_TERMS.
+    
+    STAGE 15 CHANGES (2026-08-22):
+    - FIX 6.1: Broadened _looks_generic_concept regex to recognize
+      hyphenated entities (Lychee-FD, Thinker-Talker) that were being
+      misidentified as generic concepts and routed to direct_llm.
+    - FIX 6.3: Loosened _CALCULATOR_INTENT regex from [?\" ] to [?\".]?
+      so questions ending with periods are accepted.
+    - FIX 6.7: Added "collection" to database scope-word list in
+      _DATABASE_INTENT for MongoDB terminology support.
+
+    STAGE 16 CHANGES (2026-08-22 -- root causes 8, 9, 10):
+    - Root cause 8: added introduction/conclusion/methodology/related
+      work to _DOCUMENT_INTENT's section-word list.
+    - Root cause 9: added a general bare-"how does X <verb-phrase>"
+      pattern to the explanation layer, gated by the same technical-
+      entity check as bare-"what is" (now shared via
+      _TECHNICAL_ENTITY_MARKERS). Known remaining gap: bare acronyms
+      with no hyphen (e.g. "BERT") aren't recognized as entities by
+      this gate yet -- same root gap as 6.2, not yet fixed.
+    - Root cause 10: added "who invented/discovered/founded/created X"
+      to _HISTORICAL_INTENT.
     """
 
     def __init__(self, llm, db=None):
@@ -991,6 +1259,9 @@ class PlannerAgent(BaseAgent):
         
         Covers: paper/pdf/abstract/figure/table/section references,
         document-specific metrics, "according to the paper", etc.
+
+        STAGE 16 FIX (root cause 8): section-word list broadened -- see
+        _DOCUMENT_INTENT above.
         """
         if _DOCUMENT_INTENT.search(question):
             print(f"[PLANNER] Document-intent pattern detected: "
@@ -1006,12 +1277,41 @@ class PlannerAgent(BaseAgent):
         If detected, returns ["database"] (high confidence 0.95).
         If not detected, returns None (LLM will decide).
         
-        Covers: how many users/records, total, sum, app database queries.
+        Covers: how many users/records, total, sum, app database queries,
+        and (2026-08-22) documents/pdfs/files/sessions/etc. with an
+        explicit database/system scope or stored/recorded phrasing.
         """
         if _DATABASE_INTENT.search(question):
             print(f"[PLANNER] Database-intent pattern detected: "
                   f"{question[:70]}...")
             return ["database"]
+        return None
+
+    def _deterministic_slack_search_routing(self, question: str) -> list[str] | None:
+        """
+        2026-08-22 STAGE 16+ (root cause 6.5): Detect Slack message-search
+        intent and route to tool/slack_search.
+
+        MUST run BEFORE _deterministic_weather_action_routing and
+        _deterministic_web_routing so that Slack questions containing
+        recency words ("Find *recent* Slack messages...") are not stolen
+        by _WEB_INTENT's temporal-keyword branches.
+
+        Only fires when \bslack\b is present AND a search/read verb is
+        detected (see _SLACK_SEARCH_INTENT). Questions about posting to
+        Slack (send/post/notify) do NOT match and are left for the
+        weather/action routing layer to handle (they already matched
+        _WEATHER_ACTION_INTENT's post/send/slack branch).
+
+        If detected, returns ["tool"] (high confidence 0.95).
+        resolve_concrete_tool() / resolve_sub_tool() will then map this
+        to "slack_search" using the same search-vs-post discrimination
+        logic in tool_mapping.py.
+        """
+        if _SLACK_SEARCH_INTENT.search(question):
+            print(f"[PLANNER] Slack-search-intent detected: "
+                  f"{question[:70]}...")
+            return ["tool"]
         return None
 
     def _deterministic_calculator_routing(self, question: str) -> list[str] | None:
@@ -1119,6 +1419,33 @@ class PlannerAgent(BaseAgent):
         a request to *fetch/compute* something -- it's a distinct
         category, not merely "in case the earlier layers missed it".
 
+        2026-08-22 FIX (v7 note at top of file): the bare-"what is"
+        shortcut below now defers (returns None) when the question
+        explicitly names our own database/app/storage
+        (_APP_DATA_SCOPE_TERMS) instead of confidently asserting
+        direct_llm. This is a backstop for cases the broadened
+        _DATABASE_INTENT above still doesn't catch (typos, unusual
+        phrasing) -- it doesn't route to database itself, it just
+        stops this layer from preempting Layer 3/4, which already know
+        how to route database questions.
+
+        STAGE 16 ADDITION (root cause 9): a general bare-"how does X
+        <verb-phrase>" check, run after the existing "how does X work"
+        branch inside _EXPLANATION_MARKER. Gated by
+        _TECHNICAL_ENTITY_MARKERS on the WHOLE question (not just an
+        extracted subject span, since "how does X <verb> Y" doesn't
+        have a clean single-noun-phrase boundary the way "what is X"
+        does) -- if any technical-entity-looking token appears anywhere
+        in the question, this defers (returns None) instead of
+        asserting direct_llm, so a genuine document question like "How
+        does Lychee-FD achieve real-time interaction?" still falls
+        through to Layer 3/4 rather than being preempted here. KNOWN
+        GAP: this only catches entities matching
+        _TECHNICAL_ENTITY_MARKERS (hyphenated/PascalCase/digit+letter
+        forms) -- a bare ALLCAPS acronym like "BERT" is not currently
+        recognized and will be treated as a generic "how does X work"
+        question. Same root gap as 6.2; not fixed here.
+
         If detected, returns ["direct_llm"] (high confidence 0.9).
         If not detected, returns None (LLM will decide).
         """
@@ -1131,12 +1458,30 @@ class PlannerAgent(BaseAgent):
                   f"{question[:70]}...")
             return ["direct_llm"]
         if not _HAS_DIGIT.search(question) and _BARE_WHAT_IS.match(question.strip()):
+            if _APP_DATA_SCOPE_TERMS.search(question):
+                print(f"[PLANNER] Bare 'what is' question mentions our own "
+                      f"database/app data -- deferring to LLM/keyword "
+                      f"routing instead of asserting direct_llm: "
+                      f"{question[:70]}...")
+                return None
             if _looks_generic_concept(question):
                 print(f"[PLANNER] Bare general-knowledge question detected: "
                       f"{question[:70]}...")
                 return ["direct_llm"]
             else:
                 return None
+        # STAGE 16 ADDITION (root cause 9): bare "how does X <verb phrase>"
+        # not already caught by _EXPLANATION_MARKER's "...work" branch.
+        if _BARE_HOW_DOES.match(question.strip()):
+            if _TECHNICAL_ENTITY_MARKERS.search(question):
+                print(f"[PLANNER] Bare 'how does' question mentions a "
+                      f"technical-entity-looking token -- deferring to "
+                      f"LLM/keyword routing instead of asserting "
+                      f"direct_llm: {question[:70]}...")
+                return None
+            print(f"[PLANNER] Bare 'how does X <verb>' question detected: "
+                  f"{question[:70]}...")
+            return ["direct_llm"]
         return None
 
     async def _execute(self, state: AgentState) -> AgentState:
@@ -1193,6 +1538,12 @@ class PlannerAgent(BaseAgent):
 
         # Calculator-intent
         deterministic = self._deterministic_calculator_routing(question_to_classify)
+        if deterministic is not None:
+            return self._apply_placeholder_check(state, deterministic, 0.95)
+
+        # Slack-search-intent (BEFORE weather/web to prevent "recent/latest"
+        # Slack questions being captured by _WEB_INTENT's temporal branches)
+        deterministic = self._deterministic_slack_search_routing(question_to_classify)
         if deterministic is not None:
             return self._apply_placeholder_check(state, deterministic, 0.95)
 
