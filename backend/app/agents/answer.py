@@ -230,18 +230,23 @@ def _numeric_claims_grounded(answer: str, context: str, question: str, sources: 
     if not numbers_in_answer:
         return True
 
-    # Extract entities from ROWS first (more precise than question parsing)
-    # This is the key change: use actual row labels instead of capitalization heuristic
+    # 2026-08-25 FIX: Do not force entity-level grounding for general numeric questions.
+    # If the question doesn't name any entities and doesn't ask for a specific metric field,
+    # it's a general question (e.g. "What is the learning rate?").
+    entities_from_question = _extract_entities_from_question(question)
+    field_hint = _extract_field_hint(question)
+    
+    if not entities_from_question and not field_hint:
+        # For purely conceptual questions with no entity names or specific metric fields
+        return all(num in context for num in numbers_in_answer)
+
+    # For entity/metric queries, extract entities from ROWS first (more precise than question parsing)
+    # This handles aliases like "Lychee-FD (Ours)" exactly as they appear in the data.
     entities_from_rows = _extract_entities_from_rows(context)
 
     if not entities_from_rows:
         # No table rows in context -- fall back to question-based extraction
-        # for conceptual/non-comparative questions (unchanged behavior)
-        entities = _extract_entities_from_question(question)
-        if not entities:
-            # No named entity anywhere -- weaker existence check
-            # For purely conceptual questions with no entity names
-            return all(num in context for num in numbers_in_answer)
+        entities = entities_from_question
     else:
         # Use entities extracted from actual row labels
         entities = entities_from_rows
@@ -340,7 +345,7 @@ class AnswerAgent(BaseAgent):
                 key=lambda d: d.get("rerank_score", d.get("combined_score", 0.0)),
                 reverse=True,
             )
-            top_docs = (protected + other)[:3]
+            top_docs = (protected + other)[:5]
         else:
             top_docs = []
 
@@ -419,10 +424,15 @@ class AnswerAgent(BaseAgent):
             has_any_retrieved_docs = bool(state.retrieved_docs)
 
             if not has_any_retrieved_docs and not web_error:
-                message = (
-                    "I don't have any documents to search. "
-                    "Please upload documents first, then ask your question."
-                )
+                if "documents" in sources_needed:
+                    message = (
+                        "I couldn't find any relevant documents to search. "
+                        "Please upload documents first, then ask your question."
+                    )
+                else:
+                    message = (
+                        "I couldn't find enough information to confidently answer this question."
+                    )
             elif has_any_retrieved_docs and web_error:
                 message = (
                     "I found some content in your documents, but it wasn't a strong "
