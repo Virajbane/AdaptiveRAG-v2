@@ -297,102 +297,127 @@ docker compose up -d
 
 ## Installation (Step-by-Step)
 
-Follow this exact order. Skipping ahead (e.g. starting the backend before Docker containers are healthy) is the most common cause of confusing errors.
+Follow this exact sequence to perform a clean setup from zero.
 
-### 1. Clone the repository
-
+### 1. Clone repository
 ```powershell
 git clone <your-repo-url>
+```
+
+### 2. Enter project directory
+```powershell
 cd rag-2.0-system
 ```
 
-### 2. Create environment files
+### 3. Install prerequisites
+Ensure you have Docker Desktop (with WSL2 if on Windows), Node.js (20+), Python (3.12+), and Ollama installed.
 
+### 4. Create Python virtual environment
 ```powershell
+cd backend
+python -m venv venv
+```
+
+### 5. Activate virtual environment
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+*(If you see an execution policy error, run `Set-ExecutionPolicy Bypass -Scope Process` first)*
+
+### 6. Install backend dependencies
+```powershell
+pip install -r requirements.txt
+```
+
+### 7. Install frontend dependencies
+Open a second terminal and run:
+```powershell
+cd frontend
+npm ci
+```
+*(We use `npm ci` for a clean install from `package-lock.json`)*
+
+### 8. Create .env from .env.example
+```powershell
+# In the root directory (Terminal 1)
 copy .env.example .env
+
+# In the backend directory
 copy backend\.env.example backend\.env
 ```
+*(For the frontend, the URL defaults to localhost:8000. If you need to override it, create `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:8000`)*
 
-Edit both files with a text editor. Set matching Mongo/Redis credentials as described above. Then create the frontend file:
+### 9. Explain every required environment variable
+Make sure your variables match across files.
+- **Root `.env`**: Sets the initialization credentials for the docker containers.
+  - `MONGO_PASSWORD`: (Required) Password for the MongoDB root user.
+  - `REDIS_PASSWORD`: (Required) Password for the Redis container.
+  - `QDRANT_API_KEY`: (Optional) Set to enable Qdrant API key auth.
+  - `SECRET_KEY`: (Required) JWT / App secret used to sign session tokens.
+- **Backend `backend/.env`**:
+  - `MONGODB_URL`: (Required) Full Mongo connection string. Must embed the `MONGO_PASSWORD` defined in the root `.env`.
+  - `REDIS_URL`: (Required) Redis connection string. Must embed `REDIS_PASSWORD`.
+  - `QDRANT_API_KEY`: (Optional) Must match root `.env` if Qdrant auth is enabled.
+  - `SECRET_KEY`: (Required) Must match root `.env`.
+  - `TAVILY_API_KEY`: (Optional) Web search capability.
 
+### 10. Start MongoDB
 ```powershell
-echo NEXT_PUBLIC_API_URL=http://localhost:8000 > frontend\.env.local
+docker compose up -d mongodb
 ```
 
-### 3. Start Docker infrastructure
-
+### 11. Start Redis
 ```powershell
-docker compose up -d
+docker compose up -d redis
 ```
 
-### 4. Verify Docker containers are healthy
-
+### 12. Start Qdrant
 ```powershell
-docker compose ps
+docker compose up -d qdrant
 ```
+*(Note: By default Qdrant runs without an API key locally via unencrypted HTTP. If you configure `QDRANT_API_KEY`, Qdrant might log a warning "Api key is used with unsecure connection". This is expected and safe for local development.)*
 
-Confirm `mongodb` and `redis` show `(healthy)` before continuing. If a container shows `Exited` or `Restarting`, check its logs immediately:
-
+### 13. Download/cache ML models if necessary
 ```powershell
-docker logs <container-name>
-docker inspect <container-name>
-```
-
-Do not proceed until all three containers (`mongodb`, `redis`, `qdrant`) are up.
-
-### 5. Start Ollama and pull required models
-
-In a separate terminal (leave it running):
-
-```powershell
+# Leave this running in a separate terminal
 ollama serve
 ```
-
-In another terminal:
-
+Then pull the models:
 ```powershell
 ollama pull qwen2.5:7b
 ollama pull nomic-embed-text
 ```
+*(Note: BGE-reranker and Docling vision models like qwen2.5vl:3b are downloaded automatically by the backend upon first use. If Hugging Face is unavailable or you are strictly offline, set `ENABLE_RERANKER=False` in your backend `.env` to gracefully skip the reranker.)*
 
-### 6. Install and start the backend
-
+### 14. Start backend
+In your backend terminal (with the venv activated):
 ```powershell
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-> If you see `running scripts is disabled on this system`, see [PowerShell Execution Policy](#powershell-execution-policy) below.
-
-```powershell
-pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+*(Note: On initial startup, you will see `INFO: No vectors in Qdrant - BM25 index empty`. This is normal; the BM25 keyword index builds itself automatically once you upload documents.)*
 
-Leave this running. Backend is now at `http://localhost:8000`.
-
-> **First-time note:** Docling downloads its layout and table-structure models (`docling-layout-heron`, `docling-models`) on the **first PDF upload**, not at install time — this can take a minute or two the very first time and is not an error.
-
-### 7. Install and start the frontend
-
-In a new terminal:
-
+### 15. Start frontend
+In your frontend terminal:
 ```powershell
-cd frontend
-npm install
 npm run dev
 ```
+The app will be available at `http://localhost:3000`.
 
-Frontend is now at `http://localhost:3000`.
+### 16. Upload a test document
+- Open `http://localhost:3000`, register, and log in.
+- Navigate to the Library and upload a PDF.
+- Wait for processing to complete.
 
-### 8. Verify everything is up
+### 17. Verify retrieval
+- Go to Chat and ask a question about the document.
+- Verify that a citation is attached to the response.
 
-Run through [Service Health Verification](#service-health-verification) before using the app.
+### 18. Verify external tools such as Tavily
+If `TAVILY_API_KEY` is configured, ask a question that requires current web search (e.g., "What is the weather today?"). Verify the system uses the web search tool to fulfill it.
 
-### 9. Register a user, log in, upload a PDF, and chat
+### 19. Troubleshooting
+See the Troubleshooting section below or `TROUBLESHOOTING.md`.
 
-See the [Smoke Test](#smoke-test) section for the exact sequence.
 
 ---
 

@@ -278,4 +278,6 @@ xxhash==3.7.0
 yarg==0.1.9
 yarl==1.24.2
 zipp==4.1.0
-zstandard==0.25.0
+zstandard==0.25.0aiosmtplib==3.0.1
+nltk==3.8.1
+slack-sdk==3.27.1
