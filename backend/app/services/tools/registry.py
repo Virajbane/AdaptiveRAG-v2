@@ -51,6 +51,20 @@ class ToolRegistry:
                     "message": "Message to post"
                 }
             },
+            # 2026-08-22 STAGE 16+ FIX (root cause 6.5): slack_search is the
+            # concrete tool for Slack message-search routing. Requires a user
+            # token (xoxp-...) with search:read scope in SLACK_BOT_TOKEN.
+            "slack_search": {
+                "name": "slack_search",
+                "description": "Search Slack message history for a keyword or topic",
+                "callable": slack_tool.search_messages,
+                "params": {
+                    "query": "Keyword or phrase to search for",
+                    "channel": "(optional) Slack channel to restrict search to",
+                    "user": "(optional) Slack user ID to filter by sender",
+                    "count": "(optional) Max number of results (default 10)"
+                }
+            },
             "send_email": {
                 "name": "send_email",
                 "description": "Send an email via Gmail SMTP",

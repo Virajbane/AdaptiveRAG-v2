@@ -270,12 +270,21 @@ def extract_sources_from_planner_result(result: Any) -> List[str]:
 # ============================================================================
 # Test case definitions
 # ============================================================================
+#
+# SINGLE SOURCE OF TRUTH:
+# planner_decision_eval_tests.json
+#
+# The Python evaluator intentionally contains NO hardcoded routing questions.
+# All Calculator, Weather, Web, Database, Slack, Direct LLM, and
+# Ambiguous/Negative routing questions are loaded from PLAN_* entries
+# in the JSON file.
+# ============================================================================
 
 PLANNER_TEST_FILE = "planner_decision_eval_tests.json"
 
 
 def load_planner_decision_tests(path: str = PLANNER_TEST_FILE) -> List[Dict[str, Any]]:
-    """Load the dedicated planner-decision JSON suite."""
+    """Load the complete planner-decision JSON suite."""
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
@@ -297,84 +306,36 @@ def load_planner_decision_tests(path: str = PLANNER_TEST_FILE) -> List[Dict[str,
     return normalized
 
 
-def extract_tool_from_planner_result(result: Any) -> Optional[str]:
-    """Extract the concrete tool from common planner output shapes."""
-    if result is None:
-        return None
-
-    if isinstance(result, str):
-        try:
-            return extract_tool_from_planner_result(json.loads(result))
-        except Exception:
-            pass
-
-        for key in ("tool", "tool_name", "selected_tool", "actual_tool"):
-            match = re.search(
-                rf'"{key}"\s*:\s*"([^"]+)"',
-                result,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                return match.group(1)
-        return None
-
-    for key in (
-        "tool",
-        "tool_name",
-        "selected_tool",
-        "selected_tool_name",
-        "actual_tool",
-    ):
-        value = state_get(result, key)
-        if value:
-            return str(value)
-
-    plan = state_get(result, "plan")
-    if plan:
-        return extract_tool_from_planner_result(plan)
-
-    return None
+def load_routing_test_cases(path: str = PLANNER_TEST_FILE) -> List[Dict[str, Any]]:
+    """Load only PLAN_* cases from the shared JSON suite."""
+    return [
+        case for case in load_planner_decision_tests(path)
+        if case["id"].startswith("PLAN_")
+    ]
 
 
-def planner_decision_matches(
-    case: Dict[str, Any],
-    actual_sources: List[str],
-    actual_tool: Optional[str],
-) -> Tuple[bool, str]:
-    """Evaluate planner source/tool selection only."""
-    expected_source = case.get("expected_source")
-    expected_tool = case.get("expected_tool")
-    forbidden = set(case.get("not_expected_sources", []))
-    actual_source_set = set(actual_sources)
+def routing_category(test_id: str) -> str:
+    """Map PLAN_* IDs to the report category."""
+    if test_id.startswith("PLAN_CALC_"):
+        return "Calculator"
+    if test_id.startswith("PLAN_WEATHER_"):
+        return "Weather"
+    if test_id.startswith("PLAN_WEB_"):
+        return "Web Search"
+    if test_id.startswith("PLAN_DB_"):
+        return "Database"
+    if test_id.startswith("PLAN_SLACK_"):
+        return "Slack"
+    if test_id.startswith("PLAN_LLM_"):
+        return "Direct LLM"
+    if test_id.startswith("PLAN_AMB_"):
+        return "Ambiguous/Negative"
+    return "Planner Routing"
 
-    if expected_source not in actual_source_set:
-        return (
-            False,
-            f"Expected source={expected_source}, got "
-            f"{sorted(actual_source_set) or 'nothing'}",
-        )
 
-    forbidden_selected = sorted(forbidden.intersection(actual_source_set))
-    if forbidden_selected:
-        return (
-            False,
-            f"Planner incorrectly selected forbidden source(s): "
-            f"{forbidden_selected}",
-        )
-
-    if expected_tool is not None and actual_tool != expected_tool:
-        return (
-            False,
-            f"Expected tool={expected_tool!r}, got {actual_tool!r}",
-        )
-
-    if expected_tool is None and actual_tool not in (None, "", "none", "None"):
-        return (
-            False,
-            f"Expected no concrete tool, got {actual_tool!r}",
-        )
-
-    return True, ""
+# ============================================================================
+# Test execution
+# ============================================================================
 
 
 async def test_planner_only(
@@ -383,62 +344,124 @@ async def test_planner_only(
     test_cases: List[Dict[str, Any]],
 ) -> None:
     """
-    Pure planner evaluation.
+    Evaluate planner decisions only, using the shared JSON test suite.
 
-    Question -> Planner -> decision assertion.
-
-    Does NOT invoke the orchestrator, tools, document retrieval, or answer
-    generation. This isolates planner behavior.
+    No orchestrator/tool execution is performed here. This verifies that the
+    planner selected the expected source and, when the planner exposes it,
+    the expected concrete tool.
     """
-    print(f"\n{'=' * 100}")
-    print("PLANNER-ONLY EVALUATION")
-    print(f"{'=' * 100}")
-    print(f"Loaded {len(test_cases)} planner decision tests")
+    print(f"\n{'='*80}")
+    print(f"Testing: Planner Decision ({len(test_cases)} tests)")
+    print(f"{'='*80}")
 
     for case in test_cases:
         test_id = case["id"]
         question = case["question"]
         expected_source = case["expected_source"]
         expected_tool = case.get("expected_tool")
+        forbidden_sources = case.get("not_expected_sources") or []
 
         try:
             t0 = time.perf_counter()
-
             planner_state = await invoke_planner(
                 planner,
                 question,
                 user_id=user_id,
             )
-
             latency = time.perf_counter() - t0
 
-            actual_sources = extract_sources_from_planner_result(
-                planner_state
-            )
-            actual_tool = extract_tool_from_planner_result(planner_state)
-            rewritten_question = state_get(
-                planner_state,
-                "rewritten_question",
-                question,
-            )
+            actual_sources = extract_sources_from_planner_result(planner_state)
+            actual_source = actual_sources[0] if actual_sources else None
 
-            passed, root_cause = planner_decision_matches(
-                case,
-                actual_sources,
-                actual_tool,
-            )
+            # Different planner implementations expose the selected tool under
+            # different state keys. Support the common representations without
+            # changing the production planner.
+            actual_tool = None
+            for key in (
+                "tool",
+                "selected_tool",
+                "tool_name",
+                "selected_tool_name",
+                "planned_tool",
+            ):
+                value = state_get(planner_state, key)
+                if value:
+                    actual_tool = str(value)
+                    break
+
+            # Some planners put the decision inside plan.
+            if actual_tool is None:
+                plan = state_get(planner_state, "plan")
+                if plan:
+                    for key in (
+                        "tool",
+                        "selected_tool",
+                        "tool_name",
+                        "selected_tool_name",
+                        "planned_tool",
+                    ):
+                        value = state_get(plan, key)
+                        if value:
+                            actual_tool = str(value)
+                            break
+
+            passed = expected_source in actual_sources
+
+            if expected_tool is not None:
+                # If the planner exposes a concrete tool, enforce it.
+                passed = passed and actual_tool == expected_tool
+            else:
+                passed = passed and actual_tool in (None, "", "none", "None")
+
+            if forbidden_sources:
+                passed = passed and all(
+                    forbidden not in actual_sources
+                    for forbidden in forbidden_sources
+                )
+
+            failure_type = ""
+            root_cause = ""
+
+            if not passed:
+                if not actual_sources:
+                    failure_type = "PLANNER"
+                    root_cause = "Planner returned empty sources."
+                elif expected_source not in actual_sources:
+                    failure_type = "PLANNER"
+                    root_cause = (
+                        f"Expected source={expected_source!r}, "
+                        f"got {actual_sources!r}."
+                    )
+                elif expected_tool is not None and actual_tool != expected_tool:
+                    failure_type = "TOOL_ROUTING"
+                    root_cause = (
+                        f"Expected tool={expected_tool!r}, "
+                        f"got {actual_tool!r}."
+                    )
+                else:
+                    bad = next(
+                        (
+                            forbidden
+                            for forbidden in forbidden_sources
+                            if forbidden in actual_sources
+                        ),
+                        None,
+                    )
+                    if bad:
+                        failure_type = "PLANNER"
+                        root_cause = (
+                            f"Planner selected forbidden source {bad!r}."
+                        )
 
             record_test(
-                category="Planner Decision",
+                category=routing_category(test_id),
                 test_id=test_id,
                 question=question,
-                rewritten_question=rewritten_question,
-                expected_source=expected_source,
-                actual_source=(
-                    ", ".join(actual_sources)
-                    if actual_sources
-                    else None
+                rewritten_question=state_get(
+                    planner_state, "rewritten_question"
                 ),
+                expected_source=expected_source,
+                actual_source=actual_source,
                 expected_tool=expected_tool,
                 actual_tool=actual_tool,
                 tool_executed=False,
@@ -446,17 +469,14 @@ async def test_planner_only(
                 answer_present=False,
                 document_retrieval_executed=False,
                 passed=passed,
-                failure_type="" if passed else "PLANNER",
+                failure_type=failure_type,
                 root_cause=root_cause,
                 latency_s=latency,
             )
 
-            if case.get("reason"):
-                print(f"       Reason:    {case['reason']}")
-
         except Exception as exc:
             record_test(
-                category="Planner Decision",
+                category=routing_category(test_id),
                 test_id=test_id,
                 question=question,
                 rewritten_question=None,
@@ -469,283 +489,11 @@ async def test_planner_only(
                 answer_present=False,
                 document_retrieval_executed=False,
                 passed=False,
-                failure_type="PLANNER",
-                root_cause=(
-                    f"Planner exception: {exc!r}\n"
-                    f"{traceback.format_exc(limit=2)}"
-                ),
+                failure_type="OTHER",
+                root_cause=f"Exception: {exc!r}\n{traceback.format_exc(limit=2)}",
                 latency_s=None,
             )
 
-
-
-CALCULATOR_TEST_CASES = [
-    {
-        "id": "CALC_01",
-        "question": "What is 2487 * 36 - 1295?",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-    {
-        "id": "CALC_02",
-        "question": "Calculate 1440 / 12 + 27.",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-    {
-        "id": "CALC_03",
-        "question": "What is 18 * 27 - 9?",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-    {
-        "id": "CALC_04",
-        "question": "A store has 480 products and sells 125. How many products are left?",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-    {
-        "id": "CALC_05",
-        "question": "What is 12.5% of 3200?",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-    {
-        "id": "CALC_06",
-        "question": "Convert 72 Fahrenheit to Celsius.",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-    },
-]
-
-WEATHER_TEST_CASES = [
-    {
-        "id": "WEATHER_01",
-        "question": "What is the current temperature in Hyderabad?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_02",
-        "question": "Is it raining in Bengaluru right now?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_03",
-        "question": "What is the weather like in Chennai today?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_04",
-        "question": "Will it rain in Goa today?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_05",
-        "question": "What is the temperature in Jaipur right now?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_06",
-        "question": "What's the forecast for Ahmedabad tomorrow?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_07",
-        "question": "How humid is Kolkata right now?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-    {
-        "id": "WEATHER_08",
-        "question": "What is the wind speed in Kochi today?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-    },
-]
-
-WEB_TEST_CASES = [
-    {
-        "id": "WEB_01",
-        "question": "What are the latest developments in agentic AI this week?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-    },
-    {
-        "id": "WEB_02",
-        "question": "What are the latest AI model releases today?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-    },
-    {
-        "id": "WEB_03",
-        "question": "What is the current pricing for the OpenAI API?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-    },
-    {
-        "id": "WEB_04",
-        "question": "What are the latest developments in generative AI today?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-    },
-    {
-        "id": "WEB_05",
-        "question": "What are the latest developments in LangChain this week?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-    },
-]
-
-DIRECT_LLM_TEST_CASES = [
-    {
-        "id": "LLM_01",
-        "question": "What is vector search?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-    },
-    {
-        "id": "LLM_02",
-        "question": "What is dependency injection in software engineering?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-    },
-    {
-        "id": "LLM_03",
-        "question": "Explain the difference between threads and processes in Python.",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-    },
-    {
-        "id": "LLM_04",
-        "question": "What is attention in a transformer model?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-    },
-    {
-        "id": "LLM_05",
-        "question": "What is the difference between precision and recall?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-    },
-]
-
-DATABASE_TEST_CASES = [
-    {
-        "id": "DB_01",
-        "question": "How many patient records are currently in the database?",
-        "expected_source": "database",
-        "expected_tool": "sql_query",
-    },
-    {
-        "id": "DB_02",
-        "question": "How many records are stored in the appointments table?",
-        "expected_source": "database",
-        "expected_tool": "sql_query",
-    },
-    {
-        "id": "DB_03",
-        "question": "What is the total number of lab reports in the database?",
-        "expected_source": "database",
-        "expected_tool": "sql_query",
-    },
-    {
-        "id": "DB_04",
-        "question": "How many notifications were created last month?",
-        "expected_source": "database",
-        "expected_tool": "sql_query",
-    },
-    {
-        "id": "DB_05",
-        "question": "How many medication records are currently stored?",
-        "expected_source": "database",
-        "expected_tool": "sql_query",
-    },
-]
-
-AMBIGUOUS_TEST_CASES = [
-    {
-        "id": "AMB_01",
-        "question": "Convert 30 degrees Celsius to Fahrenheit.",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-        "not_expected_source": "weather",
-        "reason": "Unit conversion, not weather observation",
-    },
-    {
-        "id": "AMB_02",
-        "question": "What is 18% of 750?",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-        "not_expected_source": "direct_llm",
-        "reason": "Arithmetic, not general knowledge",
-    },
-    {
-        "id": "AMB_03",
-        "question": "What does climate mean?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-        "not_expected_source": "tool",
-        "reason": "Definition of concept, not weather data",
-    },
-    {
-        "id": "AMB_04",
-        "question": "How does climate change affect weather patterns?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-        "not_expected_source": "tool",
-        "reason": "Explanation of mechanism, not current weather",
-    },
-    {
-        "id": "AMB_05",
-        "question": "What is the history of the Indian space programme?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-        "not_expected_source": "web",
-        "reason": "Historical fact, not latest news",
-    },
-    {
-        "id": "AMB_06",
-        "question": "What's the current temperature in Nagpur?",
-        "expected_source": "tool",
-        "expected_tool": "weather",
-        "not_expected_source": "web",
-        "reason": "Current weather data, not news search",
-    },
-    {
-        "id": "AMB_07",
-        "question": "What is vector search?",
-        "expected_source": "direct_llm",
-        "expected_tool": None,
-        "not_expected_source": "documents",
-        "reason": "General knowledge definition",
-    },
-    {
-        "id": "AMB_08",
-        "question": "What are the latest developments in multimodal AI?",
-        "expected_source": "web",
-        "expected_tool": "web_search",
-        "not_expected_source": "direct_llm",
-        "reason": "Latest/current info requires search",
-    },
-    {
-        "id": "AMB_09",
-        "question": "Calculate the average of 18, 24, 30 and 36.",
-        "expected_source": "calculator",
-        "expected_tool": "calculator",
-        "not_expected_source": "weather",
-        "reason": "Arithmetic computation, not weather observation",
-    },
-]
-
-# ============================================================================
-# Test execution
-# ============================================================================
 
 async def test_routing(
     planner: Any,
@@ -788,8 +536,14 @@ async def test_routing(
             answer_present = bool(state_get(orch_state, "answer"))
             document_retrieval = bool(state_get(orch_state, "retrieved_docs"))
 
-            # Evaluate correctness
+            # Evaluate source AND concrete tool correctness.
             passed = expected_source in actual_source
+
+            if expected_tool is not None:
+                passed = passed and actual_tool == expected_tool
+            else:
+                passed = passed and actual_tool in (None, "", "none", "None")
+
             if not_expected_source:
                 passed = passed and not_expected_source not in actual_source
 
@@ -806,6 +560,16 @@ async def test_routing(
                     root_cause = (
                         f"Expected {expected_source}, got {actual_source}. "
                         f"Planner misclassified intent."
+                    )
+                elif expected_tool is not None and actual_tool != expected_tool:
+                    failure_type = "TOOL_ROUTING"
+                    root_cause = (
+                        f"Expected tool={expected_tool!r}, got {actual_tool!r}"
+                    )
+                elif expected_tool is None and actual_tool not in (None, "", "none", "None"):
+                    failure_type = "TOOL_ROUTING"
+                    root_cause = (
+                        f"Expected no concrete tool, got {actual_tool!r}"
                     )
                 elif not_expected_source in actual_source:
                     failure_type = "PLANNER"
@@ -1033,7 +797,7 @@ async def main():
     parser.add_argument(
         "--skip-slow",
         action="store_true",
-        help="Skip slow tests (web search, database)",
+        help="Skip slow tests (web search, database, Slack)",
     )
     parser.add_argument(
         "--planner-only",
@@ -1047,7 +811,7 @@ async def main():
     parser.add_argument(
         "--planner-test-file",
         default=PLANNER_TEST_FILE,
-        help="Path to the planner decision JSON test suite.",
+        help="Path to the shared planner/routing JSON test suite.",
     )
     args = parser.parse_args()
 
@@ -1111,38 +875,40 @@ async def main():
                 planner_cases,
             )
         else:
-            # Existing full pipeline evaluation.
-            await test_routing(
-                planner, orchestrator, args.user_id,
-                CALCULATOR_TEST_CASES, "Calculator"
-            )
-            await test_routing(
-                planner, orchestrator, args.user_id,
-                WEATHER_TEST_CASES, "Weather"
-            )
+            # Full pipeline routing uses the SAME JSON test file.
+            routing_cases = load_routing_test_cases(args.planner_test_file)
 
-            if not args.skip_slow:
-                await test_routing(
-                    planner, orchestrator, args.user_id,
-                    WEB_TEST_CASES, "Web Search"
-                )
-                await test_routing(
-                    planner, orchestrator, args.user_id,
-                    DATABASE_TEST_CASES, "Database"
-                )
-            else:
-                print(
-                    "\n(Skipping Web and Database tests due to --skip-slow)"
-                )
+            grouped_cases = {}
+            for case in routing_cases:
+                category = routing_category(case["id"])
+                grouped_cases.setdefault(category, []).append(case)
 
-            await test_routing(
-                planner, orchestrator, args.user_id,
-                DIRECT_LLM_TEST_CASES, "Direct LLM"
-            )
-            await test_routing(
-                planner, orchestrator, args.user_id,
-                AMBIGUOUS_TEST_CASES, "Ambiguous/Negative"
-            )
+            category_order = [
+                "Calculator",
+                "Weather",
+                "Web Search",
+                "Database",
+                "Slack",
+                "Direct LLM",
+                "Ambiguous/Negative",
+            ]
+
+            for category in category_order:
+                cases = grouped_cases.get(category, [])
+                if not cases:
+                    continue
+
+                if args.skip_slow and category in {"Web Search", "Database", "Slack"}:
+                    print(f"\n(Skipping {category} tests due to --skip-slow)")
+                    continue
+
+                await test_routing(
+                    planner,
+                    orchestrator,
+                    args.user_id,
+                    cases,
+                    category,
+                )
 
     except Exception as exc:
         print(f"\n❌ Test execution failed: {exc}")

@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-08-18 20:25:46",
+  "timestamp": "2026-08-22 14:49:26",
   "metrics": {
-    "Total Tests": 99,
-    "Passed": 91,
-    "Failed": 8,
-    "Pass Rate %": 91.91919191919192,
-    "Planner Accuracy %": 91.91919191919192,
-    "Tool Selection Accuracy %": 92.47311827956989,
+    "Total Tests": 122,
+    "Passed": 117,
+    "Failed": 5,
+    "Pass Rate %": 95.90163934426229,
+    "Planner Accuracy %": 95.90163934426229,
+    "Tool Selection Accuracy %": 95.57522123893806,
     "Answer Generation %": 0.0,
     "Document Isolation %": 100.0
   },
   "results": [
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L1_Q1",
       "question": "What is the core problem that Lychee-FD addresses in full-duplex SLMs?",
       "rewritten_question": "What is the core problem that Lychee-FD addresses in full-duplex SLMs?",
@@ -27,10 +27,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.028905999999551568
+      "latency_s": 0.026092599999174126
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L1_Q2",
       "question": "According to the abstract, what are the two key performance improvements Lychee-FD achieves?",
       "rewritten_question": "According to the abstract, what are the two key performance improvements Lychee-FD achieves?",
@@ -45,28 +45,28 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002070300000923453
+      "latency_s": 0.0020643999996536877
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L1_Q3",
       "question": "What is the main limitation of half-duplex systems mentioned in the introduction?",
       "rewritten_question": "What is the main limitation of half-duplex systems mentioned in the introduction?",
       "expected_source": "documents",
-      "actual_source": "direct_llm",
+      "actual_source": "documents",
       "expected_tool": "document_retrieval",
-      "actual_tool": null,
+      "actual_tool": "document_retrieval",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=documents, got ['direct_llm']",
-      "latency_s": 0.0021176999998715473
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001796700000340934
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L1_Q4",
       "question": "What performance drop does Moshi experience after full-duplex alignment?",
       "rewritten_question": "What performance drop does Moshi experience after full-duplex alignment?",
@@ -81,10 +81,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018909000009443844
+      "latency_s": 0.0017550000002302113
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L2_Q5",
       "question": "Name the three main paradigms for full-duplex systems discussed in Section 2.2",
       "rewritten_question": "Name the three main paradigms for full-duplex systems discussed in Section 2.2",
@@ -99,28 +99,28 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020206000008329283
+      "latency_s": 0.0016034999998737476
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L2_Q6",
       "question": "What is the key difference between Thinker-Talker and Native End-to-End architectures?",
       "rewritten_question": "What is the key difference between Thinker-Talker and Native End-to-End architectures?",
       "expected_source": "documents",
-      "actual_source": "direct_llm",
+      "actual_source": "documents",
       "expected_tool": "document_retrieval",
-      "actual_tool": null,
+      "actual_tool": "document_retrieval",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=documents, got ['direct_llm']",
-      "latency_s": 0.002099600000292412
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 1.6312772000001132
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L2_Q7",
       "question": "Which architectures use CDM (Channel-Division Multiplexing) approach?",
       "rewritten_question": "Which architectures use CDM (Channel-Division Multiplexing) approach?",
@@ -135,28 +135,28 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.9989860000005137
+      "latency_s": 1.27414250000038
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L3_Q8",
       "question": "What two gradient-based observations reveal the root cause of modality interference?",
       "rewritten_question": "What two gradient-based observations reveal the root cause of modality interference?",
       "expected_source": "documents",
-      "actual_source": "documents",
+      "actual_source": "web",
       "expected_tool": "document_retrieval",
-      "actual_tool": "document_retrieval",
+      "actual_tool": "web_search",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": true,
-      "failure_type": "",
-      "root_cause": "",
-      "latency_s": 2.6446370000012394
+      "passed": false,
+      "failure_type": "PLANNER",
+      "root_cause": "Expected source='documents', got ['web'].",
+      "latency_s": 1.0978975999996692
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L3_Q9",
       "question": "In Figure 2a, at what layer depth does gradient cosine similarity transition from positive to negative?",
       "rewritten_question": "In Figure 2a, at what layer depth does gradient cosine similarity transition from positive to negative?",
@@ -171,10 +171,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0027500000014697434
+      "latency_s": 0.0030479000006380375
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L3_Q10",
       "question": "What frequency mismatch between text and audio is addressed using padding tokens?",
       "rewritten_question": "What frequency mismatch between text and audio is addressed using padding tokens?",
@@ -189,10 +189,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6293703999999707
+      "latency_s": 1.151286700000128
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L3_Q11",
       "question": "What does semantic dilution mean in the context of full-duplex SLMs?",
       "rewritten_question": "What does semantic dilution mean in the context of full-duplex SLMs?",
@@ -207,10 +207,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0029916000003140653
+      "latency_s": 0.0026934999996228726
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L4_Q12",
       "question": "What is the name of Lychee-FD's backbone model and what is its frame rate for acoustic tokenization?",
       "rewritten_question": "What is the name of Lychee-FD's backbone model and what is its frame rate for acoustic tokenization?",
@@ -225,10 +225,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6582667999991827
+      "latency_s": 1.1362970999998652
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L4_Q13",
       "question": "How many Transformer layers comprise the shared backbone in Lychee-FD's architecture?",
       "rewritten_question": "How many Transformer layers comprise the shared backbone in Lychee-FD's architecture?",
@@ -243,13 +243,31 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.646973099999741
+      "latency_s": 1.1761717999997927
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L4_Q14",
       "question": "Name the three specialized heads that branch from Lychee-FD's shared backbone in deep layers",
       "rewritten_question": "Name the three specialized heads that branch from Lychee-FD's shared backbone in deep layers",
+      "expected_source": "documents",
+      "actual_source": "web",
+      "expected_tool": "document_retrieval",
+      "actual_tool": "web_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": false,
+      "failure_type": "PLANNER",
+      "root_cause": "Expected source='documents', got ['web'].",
+      "latency_s": 1.1958762000003844
+    },
+    {
+      "category": "Planner Routing",
+      "test_id": "L4_Q15",
+      "question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
+      "rewritten_question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
       "expected_source": "documents",
       "actual_source": "documents",
       "expected_tool": "document_retrieval",
@@ -261,28 +279,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6354530999997223
+      "latency_s": 1.1626192000003357
     },
     {
-      "category": "Planner Decision",
-      "test_id": "L4_Q15",
-      "question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
-      "rewritten_question": "What is the purpose of the Semantic Alignment Channel in Lychee-FD?",
-      "expected_source": "documents",
-      "actual_source": "direct_llm",
-      "expected_tool": "document_retrieval",
-      "actual_tool": null,
-      "tool_executed": false,
-      "tool_result_present": false,
-      "answer_present": false,
-      "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=documents, got ['direct_llm']",
-      "latency_s": 0.0028485000002547167
-    },
-    {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L4_Q16",
       "question": "In Equation 6, what does Om represent in the hierarchical parameter separation?",
       "rewritten_question": "In Equation 6, what does Om represent in the hierarchical parameter separation?",
@@ -297,13 +297,31 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002084699999613804
+      "latency_s": 0.0028277999999772874
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L5_Q17",
       "question": "What optimizer and learning rate schedule are used to train Lychee-FD?",
       "rewritten_question": "What optimizer and learning rate schedule are used to train Lychee-FD?",
+      "expected_source": "documents",
+      "actual_source": "web",
+      "expected_tool": "document_retrieval",
+      "actual_tool": "web_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": false,
+      "failure_type": "PLANNER",
+      "root_cause": "Expected source='documents', got ['web'].",
+      "latency_s": 1.1861816000000545
+    },
+    {
+      "category": "Planner Routing",
+      "test_id": "L5_Q18",
+      "question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
+      "rewritten_question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
       "expected_source": "documents",
       "actual_source": "documents",
       "expected_tool": "document_retrieval",
@@ -315,28 +333,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.635642799999914
+      "latency_s": 1.1630425000003015
     },
     {
-      "category": "Planner Decision",
-      "test_id": "L5_Q18",
-      "question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
-      "rewritten_question": "What is the learning rate used for Lychee-FD training and how many GPUs?",
-      "expected_source": "documents",
-      "actual_source": "direct_llm",
-      "expected_tool": "document_retrieval",
-      "actual_tool": null,
-      "tool_executed": false,
-      "tool_result_present": false,
-      "answer_present": false,
-      "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=documents, got ['direct_llm']",
-      "latency_s": 0.002741599999353639
-    },
-    {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L5_Q19",
       "question": "What global batch size and training duration are used?",
       "rewritten_question": "What global batch size and training duration are used?",
@@ -351,10 +351,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6588117999999668
+      "latency_s": 1.1326037999997425
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L5_Q20",
       "question": "How is the hierarchical architecture configured in terms of layer counts for each head?",
       "rewritten_question": "How is the hierarchical architecture configured in terms of layer counts for each head?",
@@ -369,10 +369,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6472852999995666
+      "latency_s": 1.1092625000001135
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L6_Q21",
       "question": "In Table 1, what is Lychee-FD's average accuracy across both S\u2192T and S\u2192S settings?",
       "rewritten_question": "In Table 1, what is Lychee-FD's average accuracy across both S\u2192T and S\u2192S settings?",
@@ -387,10 +387,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0024973999989015283
+      "latency_s": 0.003013699999428354
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L6_Q22",
       "question": "What is Lychee-FD's takeover rate (TOR) in Table 1, and what does it indicate?",
       "rewritten_question": "What is Lychee-FD's takeover rate (TOR) in Table 1, and what does it indicate?",
@@ -405,10 +405,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.001946700000189594
+      "latency_s": 0.002408100000138802
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L6_Q23",
       "question": "In the ablation studies (Table 1), what S\u2192S accuracy does 'w/o Param-Sep' achieve?",
       "rewritten_question": "In the ablation studies (Table 1), what S\u2192S accuracy does 'w/o Param-Sep' achieve?",
@@ -423,10 +423,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018982000001415145
+      "latency_s": 0.002093799999784096
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L6_Q24",
       "question": "In the ablation studies (Table 1), what S\u2192T accuracy does 'w/o Sem-Channel' achieve?",
       "rewritten_question": "In the ablation studies (Table 1), what S\u2192T accuracy does 'w/o Sem-Channel' achieve?",
@@ -441,10 +441,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0017810999997891486
+      "latency_s": 0.002077899999676447
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L6_Q25",
       "question": "Compared to Fun-Audio-Chat (previous SOTA), what is Lychee-FD's improvement in S\u2192S accuracy?",
       "rewritten_question": "Compared to Fun-Audio-Chat (previous SOTA), what is Lychee-FD's improvement in S\u2192S accuracy?",
@@ -459,10 +459,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6460912999991706
+      "latency_s": 1.3074271000004956
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L7_Q26",
       "question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
       "rewritten_question": "In Table 2, what is Lychee-FD's Success-Replies Rate (SRR) on FDBench?",
@@ -477,10 +477,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0064552999992884
+      "latency_s": 0.002650799999173614
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L7_Q27",
       "question": "In Table 2 FullDuplexBench 1.5, what is Lychee-FD's Interruption-Response Rate (IRR)?",
       "rewritten_question": "In Table 2 FullDuplexBench 1.5, what is Lychee-FD's Interruption-Response Rate (IRR)?",
@@ -495,10 +495,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002336599998670863
+      "latency_s": 0.0021870999999009655
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L7_Q28",
       "question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5 in milliseconds?",
       "rewritten_question": "In Table 2, what is Lychee-FD's response latency (Lat.) on FullDuplexBench 1.5 in milliseconds?",
@@ -513,10 +513,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020953999992343597
+      "latency_s": 0.001984999999876891
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L7_Q29",
       "question": "What improvement does Lychee-FD achieve over Freeze-Omni on FullDuplexBench 1.5?",
       "rewritten_question": "What improvement does Lychee-FD achieve over Freeze-Omni on FullDuplexBench 1.5?",
@@ -531,10 +531,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6553208000004815
+      "latency_s": 1.1577468000004956
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L7_Q30",
       "question": "Which metrics are used to evaluate turn-taking and interruption behaviors on FDBench?",
       "rewritten_question": "Which metrics are used to evaluate turn-taking and interruption behaviors on FDBench?",
@@ -549,10 +549,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.641326899998603
+      "latency_s": 1.1689163999999437
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L8_Q31",
       "question": "In Figure 4, what UTMOS score does Lychee-FD achieve for speech synthesis quality?",
       "rewritten_question": "In Figure 4, what UTMOS score does Lychee-FD achieve for speech synthesis quality?",
@@ -567,10 +567,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0025633000004745554
+      "latency_s": 0.003083399999923131
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L8_Q32",
       "question": "In Figure 4, what UTMOS score does Moshi achieve?",
       "rewritten_question": "In Figure 4, what UTMOS score does Moshi achieve?",
@@ -585,10 +585,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018935999996756436
+      "latency_s": 0.001990700000533252
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L8_Q33",
       "question": "In Figure 4, what UTMOS score does the 'w/o Param-Sep' ablation variant achieve?",
       "rewritten_question": "In Figure 4, what UTMOS score does the 'w/o Param-Sep' ablation variant achieve?",
@@ -603,10 +603,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.001702100000329665
+      "latency_s": 0.0019841999992422643
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L8_Q34",
       "question": "What two metrics are used to evaluate speech generation quality in Section 4.6?",
       "rewritten_question": "What two metrics are used to evaluate speech generation quality in Section 4.6?",
@@ -621,10 +621,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002208200001405203
+      "latency_s": 0.001856200000474928
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L9_Q35",
       "question": "In Section 5, which other full-duplex SLM architecture is analyzed for universal gradient conflicts?",
       "rewritten_question": "In Section 5, which other full-duplex SLM architecture is analyzed for universal gradient conflicts?",
@@ -639,10 +639,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002045499999439926
+      "latency_s": 0.0017864000001281966
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L9_Q36",
       "question": "What does Figure 5 demonstrate about modality interference across different architectures?",
       "rewritten_question": "What does Figure 5 demonstrate about modality interference across different architectures?",
@@ -657,10 +657,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0021646999994118232
+      "latency_s": 0.0017588000000614556
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L10_Q37",
       "question": "In Figure 6 (layer ablation), at how many layers does accuracy on LlamaQ saturate?",
       "rewritten_question": "In Figure 6 (layer ablation), at how many layers does accuracy on LlamaQ saturate?",
@@ -675,10 +675,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002030600000580307
+      "latency_s": 0.0018360000003667665
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L10_Q38",
       "question": "What accuracy does Lychee-FD achieve with 4 separated layers according to Figure 6?",
       "rewritten_question": "What accuracy does Lychee-FD achieve with 4 separated layers according to Figure 6?",
@@ -693,10 +693,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020411999994394137
+      "latency_s": 0.0019492999999783933
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L11_Q39",
       "question": "In Figure 7 (case study), what two key capabilities does Lychee-FD demonstrate?",
       "rewritten_question": "In Figure 7 (case study), what two key capabilities does Lychee-FD demonstrate?",
@@ -711,10 +711,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0019072999984928174
+      "latency_s": 0.0018423000001348555
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L11_Q40",
       "question": "What is the key limitation identified in Figure 8 regarding side-talk?",
       "rewritten_question": "What is the key limitation identified in Figure 8 regarding side-talk?",
@@ -729,10 +729,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0021096000000397908
+      "latency_s": 0.0020160999993095174
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L12_Q41",
       "question": "In Figure 9 (left), what is the global influence score of text on speech in fully shared baseline?",
       "rewritten_question": "In Figure 9 (left), what is the global influence score of text on speech in fully shared baseline?",
@@ -747,10 +747,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018196000000898493
+      "latency_s": 0.0018340999995416496
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L12_Q42",
       "question": "In Figure 9 (right), after hierarchical parameter separation, what does the text\u2192speech influence score become?",
       "rewritten_question": "In Figure 9 (right), after hierarchical parameter separation, what does the text\u2192speech influence score become?",
@@ -765,10 +765,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018163999993703328
+      "latency_s": 0.0017993000001297332
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L12_Q43",
       "question": "What does a negative influence score (Im\u2192i < 0) indicate in gradient analysis?",
       "rewritten_question": "What does a negative influence score (Im\u2192i < 0) indicate in gradient analysis?",
@@ -783,10 +783,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.001748599999700673
+      "latency_s": 0.0021510000005946495
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L13_Q44",
       "question": "What inference engine does Lychee-FD customize to achieve real-time full-duplex interaction?",
       "rewritten_question": "What inference engine does Lychee-FD customize to achieve real-time full-duplex interaction?",
@@ -801,10 +801,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0017047000001184642
+      "latency_s": 0.002316199999768287
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L13_Q45",
       "question": "What is DAG-PP and how does it solve multi-head inference bottlenecks?",
       "rewritten_question": "What is DAG-PP and how does it solve multi-head inference bottlenecks?",
@@ -819,10 +819,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.623243799998818
+      "latency_s": 1.1803635999995095
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L13_Q46",
       "question": "In Algorithm 1, what primitive is used to broadcast shared hidden states to specialized heads?",
       "rewritten_question": "In Algorithm 1, what primitive is used to broadcast shared hidden states to specialized heads?",
@@ -837,10 +837,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6639625999996497
+      "latency_s": 1.1174407000007704
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L14_Q47",
       "question": "How many full-duplex dialogue instances comprise the final curated training dataset?",
       "rewritten_question": "How many full-duplex dialogue instances comprise the final curated training dataset?",
@@ -855,10 +855,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002752800000962452
+      "latency_s": 0.0029201000006651157
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L14_Q48",
       "question": "How many distinct speaking styles can the User Agent sample from during data synthesis?",
       "rewritten_question": "How many distinct speaking styles can the User Agent sample from during data synthesis?",
@@ -873,10 +873,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6387923000002047
+      "latency_s": 1.1245570999999472
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L14_Q49",
       "question": "Name three interruption motivations modeled in the data synthesis pipeline",
       "rewritten_question": "Name three interruption motivations modeled in the data synthesis pipeline",
@@ -891,10 +891,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6446665999992547
+      "latency_s": 1.2427551999999196
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "L14_Q50",
       "question": "What probability is used to inject backchannels during data synthesis post-processing?",
       "rewritten_question": "What probability is used to inject backchannels during data synthesis post-processing?",
@@ -909,10 +909,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.650488700001006
+      "latency_s": 1.1064980000001015
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T1",
       "question": "What is Freeze-Omni's UTMOS speech quality score reported in Figure 4?",
       "rewritten_question": "What is Freeze-Omni's UTMOS speech quality score reported in Figure 4?",
@@ -927,10 +927,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0027948999995714985
+      "latency_s": 0.002608400000099209
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T2",
       "question": "What is VITA 1.5's average speech-to-text accuracy in Table 1?",
       "rewritten_question": "What is VITA 1.5's average speech-to-text accuracy in Table 1?",
@@ -945,10 +945,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0023218999995151535
+      "latency_s": 0.0021643000000040047
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T3",
       "question": "How many parameters does the baseline model Moshi have?",
       "rewritten_question": "How many parameters does the baseline model Moshi have?",
@@ -963,10 +963,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6629001000001153
+      "latency_s": 1.1021168999996007
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T4",
       "question": "What is the exact WER (Word Error Rate) achieved by Lychee-FD on speech-to-text conversion?",
       "rewritten_question": "What is the exact WER (Word Error Rate) achieved by Lychee-FD on speech-to-text conversion?",
@@ -981,10 +981,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6445602999992843
+      "latency_s": 1.2199325999999928
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T5",
       "question": "How many open-source datasets were used to train Lychee-FD?",
       "rewritten_question": "How many open-source datasets were used to train Lychee-FD?",
@@ -999,10 +999,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.660642099999677
+      "latency_s": 1.1455165999996098
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T6",
       "question": "What accuracy does the model 'SpeechGPT-5' achieve on LlamaQ benchmark?",
       "rewritten_question": "What accuracy does the model 'SpeechGPT-5' achieve on LlamaQ benchmark?",
@@ -1017,10 +1017,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.640718200000265
+      "latency_s": 1.1625278999999864
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "TRAP_T7",
       "question": "What is dGSLM's performance improvement over Lychee-FD on the S\u2192S setting?",
       "rewritten_question": "What is dGSLM's performance improvement over Lychee-FD on the S\u2192S setting?",
@@ -1035,10 +1035,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6131130999983725
+      "latency_s": 1.1430872000000818
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "ENTITY_E1",
       "question": "What is Moshi's average S\u2192S accuracy from Table 1?",
       "rewritten_question": "What is Moshi's average S\u2192S accuracy from Table 1?",
@@ -1053,10 +1053,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0026139000001421664
+      "latency_s": 0.002439099999719474
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "ENTITY_E2",
       "question": "What UTMOS score does Freeze-Omni achieve in Figure 4?",
       "rewritten_question": "What UTMOS score does Freeze-Omni achieve in Figure 4?",
@@ -1071,10 +1071,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0019582000004447764
+      "latency_s": 0.0020124000002397224
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "ENTITY_E3",
       "question": "In Table 2, what is Fun-Audio-Chat's Success-Replies Rate (SRR)?",
       "rewritten_question": "In Table 2, what is Fun-Audio-Chat's Success-Replies Rate (SRR)?",
@@ -1089,10 +1089,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0018628999987413408
+      "latency_s": 0.0020924999998896965
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "HALLUC_H1",
       "question": "Does the paper state that Lychee-FD requires multi-stage training like Thinker-Talker models?",
       "rewritten_question": "Does the paper state that Lychee-FD requires multi-stage training like Thinker-Talker models?",
@@ -1107,10 +1107,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.639899499999956
+      "latency_s": 1.1299268000002485
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "HALLUC_H2",
       "question": "Does the paper report that parameter separation introduces additional inference latency overhead?",
       "rewritten_question": "Does the paper report that parameter separation introduces additional inference latency overhead?",
@@ -1125,10 +1125,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0025365000001329463
+      "latency_s": 0.0029521999995267834
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "DECLINE_D1",
       "question": "What is the Whisper-v3-large model used for in Lychee-FD?",
       "rewritten_question": "What is the Whisper-v3-large model used for in Lychee-FD?",
@@ -1143,10 +1143,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6427452999996603
+      "latency_s": 1.1222249000002193
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "DECLINE_D2",
       "question": "What are the three specialized heads in Lychee-FD's hierarchical architecture?",
       "rewritten_question": "What are the three specialized heads in Lychee-FD's hierarchical architecture?",
@@ -1161,10 +1161,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6463315000000875
+      "latency_s": 1.2618240000001606
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "MULTIHOP_M1",
       "question": "The paper identifies two root causes of modality interference. What are they and how does Lychee-FD address each?",
       "rewritten_question": "The paper identifies two root causes of modality interference. What are they and how does Lychee-FD address each?",
@@ -1179,10 +1179,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.651689599999372
+      "latency_s": 1.156509399999777
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "MULTIHOP_M2",
       "question": "How do the ablation results in Table 1 validate the two architectural innovations proposed in the paper?",
       "rewritten_question": "How do the ablation results in Table 1 validate the two architectural innovations proposed in the paper?",
@@ -1197,28 +1197,28 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0026364000004832633
+      "latency_s": 0.0029022000007898896
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "MULTIHOP_M3",
       "question": "Compare Lychee-FD's approach to modality interference with the Thinker-Talker approach. What is the key trade-off?",
       "rewritten_question": "Compare Lychee-FD's approach to modality interference with the Thinker-Talker approach. What is the key trade-off?",
       "expected_source": "documents",
-      "actual_source": "documents",
+      "actual_source": "web",
       "expected_tool": "document_retrieval",
-      "actual_tool": "document_retrieval",
+      "actual_tool": "web_search",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": true,
-      "failure_type": "",
-      "root_cause": "",
-      "latency_s": 2.6474170000001322
+      "passed": false,
+      "failure_type": "PLANNER",
+      "root_cause": "Expected source='documents', got ['web'].",
+      "latency_s": 1.2086373000001913
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CACHE_C1",
       "question": "What backbone model does Lychee-FD use as its half-duplex base?",
       "rewritten_question": "What backbone model does Lychee-FD use as its half-duplex base?",
@@ -1233,10 +1233,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.614009300001271
+      "latency_s": 1.2004509999997026
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CACHE_C2",
       "question": "What three specialized heads branch from the shared backbone in Lychee-FD?",
       "rewritten_question": "What three specialized heads branch from the shared backbone in Lychee-FD?",
@@ -1251,10 +1251,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6210792000001675
+      "latency_s": 1.16618440000002
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CACHE_C3",
       "question": "In Figure 4, what UTMOS score does Lychee-FD achieve?",
       "rewritten_question": "In Figure 4, what UTMOS score does Lychee-FD achieve?",
@@ -1269,31 +1269,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002654600000823848
+      "latency_s": 0.002660699999978533
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "PRECISION_P1",
       "question": "What is the exact learning rate used in Lychee-FD training?",
       "rewritten_question": "What is the exact learning rate used in Lychee-FD training?",
-      "expected_source": "documents",
-      "actual_source": "direct_llm",
-      "expected_tool": "document_retrieval",
-      "actual_tool": null,
-      "tool_executed": false,
-      "tool_result_present": false,
-      "answer_present": false,
-      "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=documents, got ['direct_llm']",
-      "latency_s": 0.0022189999999682186
-    },
-    {
-      "category": "Planner Decision",
-      "test_id": "PRECISION_P2",
-      "question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
-      "rewritten_question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
       "expected_source": "documents",
       "actual_source": "documents",
       "expected_tool": "document_retrieval",
@@ -1305,10 +1287,28 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.641766999999163
+      "latency_s": 1.1122664000004079
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
+      "test_id": "PRECISION_P2",
+      "question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
+      "rewritten_question": "How many shared Transformer layers does Lychee-FD have in its backbone?",
+      "expected_source": "documents",
+      "actual_source": "web",
+      "expected_tool": "document_retrieval",
+      "actual_tool": "web_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": false,
+      "failure_type": "PLANNER",
+      "root_cause": "Expected source='documents', got ['web'].",
+      "latency_s": 1.156955299999936
+    },
+    {
+      "category": "Planner Routing",
       "test_id": "PRECISION_P3",
       "question": "What frame rate does CosyVoice2 tokenizer use in Lychee-FD?",
       "rewritten_question": "What frame rate does CosyVoice2 tokenizer use in Lychee-FD?",
@@ -1323,10 +1323,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.628373899999133
+      "latency_s": 1.2429474000000482
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "KEYWORD_K1",
       "question": "What two modalities does Lychee-FD try to balance in full-duplex conversation?",
       "rewritten_question": "What two modalities does Lychee-FD try to balance in full-duplex conversation?",
@@ -1341,10 +1341,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.003183099999660044
+      "latency_s": 0.00279939999927592
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "KEYWORD_K2",
       "question": "What communication primitive is used in DAG-PP for distributing computation?",
       "rewritten_question": "What communication primitive is used in DAG-PP for distributing computation?",
@@ -1359,10 +1359,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6346868999989965
+      "latency_s": 1.075161499999922
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CROSS_X1",
       "question": "How does the paper justify why 4 layers of separation is optimal for the hierarchical architecture?",
       "rewritten_question": "How does the paper justify why 4 layers of separation is optimal for the hierarchical architecture?",
@@ -1377,10 +1377,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0026776999984576833
+      "latency_s": 0.002694300000257499
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CROSS_X2",
       "question": "What evidence from Appendix 9 supports the claim that hierarchical parameter separation eliminates destructive interference?",
       "rewritten_question": "What evidence from Appendix 9 supports the claim that hierarchical parameter separation eliminates destructive interference?",
@@ -1395,10 +1395,10 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0022867999996378785
+      "latency_s": 0.0022109999999884167
     },
     {
-      "category": "Planner Decision",
+      "category": "Planner Routing",
       "test_id": "CROSS_X3",
       "question": "How do the data synthesis details in Appendix 11 support the claim that Lychee-FD achieves natural interaction?",
       "rewritten_question": "How do the data synthesis details in Appendix 11 support the claim that Lychee-FD achieves natural interaction?",
@@ -1413,13 +1413,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0022148999996716157
+      "latency_s": 0.0019291999997221865
     },
     {
-      "category": "Planner Decision",
+      "category": "Calculator",
       "test_id": "PLAN_CALC_01",
-      "question": "What is 2487 * 36 - 1295?",
-      "rewritten_question": "What is 2487 * 36 - 1295?",
+      "question": "What is 7392 * 14 + 865?",
+      "rewritten_question": "What is 7392 * 14 + 865?",
       "expected_source": "calculator",
       "actual_source": "calculator",
       "expected_tool": "calculator",
@@ -1431,13 +1431,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002230500000223401
+      "latency_s": 0.0016944999997576815
     },
     {
-      "category": "Planner Decision",
+      "category": "Calculator",
       "test_id": "PLAN_CALC_02",
-      "question": "A store has 480 products and sells 125. How many are left?",
-      "rewritten_question": "A store has 480 products and sells 125. How many are left?",
+      "question": "Calculate 8750 / 25 - 18.",
+      "rewritten_question": "Calculate 8750 / 25 - 18.",
       "expected_source": "calculator",
       "actual_source": "calculator",
       "expected_tool": "calculator",
@@ -1449,31 +1449,85 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.00256700000136334
+      "latency_s": 0.0018461999998180545
     },
     {
-      "category": "Planner Decision",
+      "category": "Calculator",
       "test_id": "PLAN_CALC_03",
-      "question": "Convert 72 Fahrenheit to Celsius.",
-      "rewritten_question": "Convert 72 Fahrenheit to Celsius.",
+      "question": "What is 63 * 48 + 127?",
+      "rewritten_question": "What is 63 * 48 + 127?",
       "expected_source": "calculator",
-      "actual_source": "documents",
+      "actual_source": "calculator",
       "expected_tool": "calculator",
-      "actual_tool": "document_retrieval",
+      "actual_tool": "calculator",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=calculator, got ['documents']",
-      "latency_s": 2.6376410000011674
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001845099999627564
     },
     {
-      "category": "Planner Decision",
+      "category": "Calculator",
+      "test_id": "PLAN_CALC_04",
+      "question": "A warehouse has 725 boxes and ships 286. How many boxes remain?",
+      "rewritten_question": "A warehouse has 725 boxes and ships 286. How many boxes remain?",
+      "expected_source": "calculator",
+      "actual_source": "calculator",
+      "expected_tool": "calculator",
+      "actual_tool": "calculator",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002047599999968952
+    },
+    {
+      "category": "Calculator",
+      "test_id": "PLAN_CALC_05",
+      "question": "What is 17.5% of 2400?",
+      "rewritten_question": "What is 17.5% of 2400?",
+      "expected_source": "calculator",
+      "actual_source": "calculator",
+      "expected_tool": "calculator",
+      "actual_tool": "calculator",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0019219999994675163
+    },
+    {
+      "category": "Calculator",
+      "test_id": "PLAN_CALC_06",
+      "question": "Convert 95 Fahrenheit to Celsius.",
+      "rewritten_question": "Convert 95 Fahrenheit to Celsius.",
+      "expected_source": "calculator",
+      "actual_source": "calculator",
+      "expected_tool": "calculator",
+      "actual_tool": "calculator",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0017785999998523039
+    },
+    {
+      "category": "Weather",
       "test_id": "PLAN_WEATHER_01",
-      "question": "What is the current temperature in Hyderabad?",
-      "rewritten_question": "What is the current temperature in Hyderabad?",
+      "question": "What is the current temperature in Pune?",
+      "rewritten_question": "What is the current temperature in Pune?",
       "expected_source": "tool",
       "actual_source": "tool",
       "expected_tool": "weather",
@@ -1485,13 +1539,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0027631000011751894
+      "latency_s": 0.00184850000005099
     },
     {
-      "category": "Planner Decision",
+      "category": "Weather",
       "test_id": "PLAN_WEATHER_02",
-      "question": "Will it rain in Goa today?",
-      "rewritten_question": "Will it rain in Goa today?",
+      "question": "Is there rain in Surat right now?",
+      "rewritten_question": "Is there rain in Surat right now?",
       "expected_source": "tool",
       "actual_source": "tool",
       "expected_tool": "weather",
@@ -1503,13 +1557,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020629999999073334
+      "latency_s": 0.0019508999994286569
     },
     {
-      "category": "Planner Decision",
+      "category": "Weather",
       "test_id": "PLAN_WEATHER_03",
-      "question": "What is the wind speed in Kochi today?",
-      "rewritten_question": "What is the wind speed in Kochi today?",
+      "question": "What are the current weather conditions in Lucknow?",
+      "rewritten_question": "What are the current weather conditions in Lucknow?",
       "expected_source": "tool",
       "actual_source": "tool",
       "expected_tool": "weather",
@@ -1521,13 +1575,103 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.00217270000030112
+      "latency_s": 0.002179000000069209
     },
     {
-      "category": "Planner Decision",
+      "category": "Weather",
+      "test_id": "PLAN_WEATHER_04",
+      "question": "Is rain expected in Jaipur today?",
+      "rewritten_question": "Is rain expected in Jaipur today?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "weather",
+      "actual_tool": "weather",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0024323999996340717
+    },
+    {
+      "category": "Weather",
+      "test_id": "PLAN_WEATHER_05",
+      "question": "What is the current temperature in Patna?",
+      "rewritten_question": "What is the current temperature in Patna?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "weather",
+      "actual_tool": "weather",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0021967000002405257
+    },
+    {
+      "category": "Weather",
+      "test_id": "PLAN_WEATHER_06",
+      "question": "What's the forecast for Indore tomorrow?",
+      "rewritten_question": "What's the forecast for Indore tomorrow?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "weather",
+      "actual_tool": "weather",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002106199999616365
+    },
+    {
+      "category": "Weather",
+      "test_id": "PLAN_WEATHER_07",
+      "question": "What is the humidity in Visakhapatnam right now?",
+      "rewritten_question": "What is the humidity in Visakhapatnam right now?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "weather",
+      "actual_tool": "weather",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0019507999995767022
+    },
+    {
+      "category": "Weather",
+      "test_id": "PLAN_WEATHER_08",
+      "question": "What is the wind speed in Bhopal today?",
+      "rewritten_question": "What is the wind speed in Bhopal today?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "weather",
+      "actual_tool": "weather",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001931499999955122
+    },
+    {
+      "category": "Web Search",
       "test_id": "PLAN_WEB_01",
-      "question": "What are the latest developments in agentic AI this week?",
-      "rewritten_question": "What are the latest developments in agentic AI this week?",
+      "question": "What are the latest developments in AI agents this week?",
+      "rewritten_question": "What are the latest developments in AI agents this week?",
       "expected_source": "web",
       "actual_source": "web",
       "expected_tool": "web_search",
@@ -1539,13 +1683,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020588000006682705
+      "latency_s": 0.001953299999513547
     },
     {
-      "category": "Planner Decision",
+      "category": "Web Search",
       "test_id": "PLAN_WEB_02",
-      "question": "What is the current pricing for the OpenAI API?",
-      "rewritten_question": "What is the current pricing for the OpenAI API?",
+      "question": "Which new foundation models were released recently?",
+      "rewritten_question": "Which new foundation models were released recently?",
       "expected_source": "web",
       "actual_source": "web",
       "expected_tool": "web_search",
@@ -1557,13 +1701,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020965999992768047
+      "latency_s": 0.0020189999995636754
     },
     {
-      "category": "Planner Decision",
+      "category": "Web Search",
       "test_id": "PLAN_WEB_03",
-      "question": "What are the latest AI model releases today?",
-      "rewritten_question": "What are the latest AI model releases today?",
+      "question": "What is the current price of NVIDIA H100 GPUs?",
+      "rewritten_question": "What is the current price of NVIDIA H100 GPUs?",
       "expected_source": "web",
       "actual_source": "web",
       "expected_tool": "web_search",
@@ -1575,13 +1719,49 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0019792999992205296
+      "latency_s": 0.00222719999965193
     },
     {
-      "category": "Planner Decision",
+      "category": "Web Search",
+      "test_id": "PLAN_WEB_04",
+      "question": "What are the latest breakthroughs in generative AI this month?",
+      "rewritten_question": "What are the latest breakthroughs in generative AI this month?",
+      "expected_source": "web",
+      "actual_source": "web",
+      "expected_tool": "web_search",
+      "actual_tool": "web_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0023532999994131387
+    },
+    {
+      "category": "Web Search",
+      "test_id": "PLAN_WEB_05",
+      "question": "What changed recently in the LangGraph ecosystem?",
+      "rewritten_question": "What changed recently in the LangGraph ecosystem?",
+      "expected_source": "web",
+      "actual_source": "web",
+      "expected_tool": "web_search",
+      "actual_tool": "web_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001854799999819079
+    },
+    {
+      "category": "Database",
       "test_id": "PLAN_DB_01",
-      "question": "How many patient records are currently in the database?",
-      "rewritten_question": "How many patient records are currently in the database?",
+      "question": "How many users are currently registered in the application?",
+      "rewritten_question": "How many users are currently registered in the application?",
       "expected_source": "database",
       "actual_source": "database",
       "expected_tool": "sql_query",
@@ -1593,13 +1773,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6342002999990655
+      "latency_s": 0.002104700000018056
     },
     {
-      "category": "Planner Decision",
+      "category": "Database",
       "test_id": "PLAN_DB_02",
-      "question": "How many records are stored in the appointments table?",
-      "rewritten_question": "How many records are stored in the appointments table?",
+      "question": "How many chat sessions are currently stored?",
+      "rewritten_question": "How many chat sessions are currently stored?",
       "expected_source": "database",
       "actual_source": "database",
       "expected_tool": "sql_query",
@@ -1611,13 +1791,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 2.6345504999990226
+      "latency_s": 0.0017815000001064618
     },
     {
-      "category": "Planner Decision",
+      "category": "Database",
       "test_id": "PLAN_DB_03",
-      "question": "How many notifications were created last month?",
-      "rewritten_question": "How many notifications were created last month?",
+      "question": "How many uploaded documents are stored in the database?",
+      "rewritten_question": "How many uploaded documents are stored in the database?",
       "expected_source": "database",
       "actual_source": "database",
       "expected_tool": "sql_query",
@@ -1629,13 +1809,49 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0024580000008427305
+      "latency_s": 0.001674799999818788
     },
     {
-      "category": "Planner Decision",
+      "category": "Database",
+      "test_id": "PLAN_DB_04",
+      "question": "How many long-term memory records are stored?",
+      "rewritten_question": "How many long-term memory records are stored?",
+      "expected_source": "database",
+      "actual_source": "database",
+      "expected_tool": "sql_query",
+      "actual_tool": "sql_query",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001783699999577948
+    },
+    {
+      "category": "Database",
+      "test_id": "PLAN_DB_05",
+      "question": "How many records are currently present in the users collection?",
+      "rewritten_question": "How many records are currently present in the users collection?",
+      "expected_source": "database",
+      "actual_source": "database",
+      "expected_tool": "sql_query",
+      "actual_tool": "sql_query",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002005099999223603
+    },
+    {
+      "category": "Direct LLM",
       "test_id": "PLAN_LLM_01",
-      "question": "What is vector search?",
-      "rewritten_question": "What is vector search?",
+      "question": "What is cosine similarity in machine learning?",
+      "rewritten_question": "What is cosine similarity in machine learning?",
       "expected_source": "direct_llm",
       "actual_source": "direct_llm",
       "expected_tool": null,
@@ -1647,13 +1863,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.001987600000575185
+      "latency_s": 0.0020475000001169974
     },
     {
-      "category": "Planner Decision",
+      "category": "Direct LLM",
       "test_id": "PLAN_LLM_02",
-      "question": "Explain dependency injection in software engineering.",
-      "rewritten_question": "Explain dependency injection in software engineering.",
+      "question": "What is inversion of control in software design?",
+      "rewritten_question": "What is inversion of control in software design?",
       "expected_source": "direct_llm",
       "actual_source": "direct_llm",
       "expected_tool": null,
@@ -1665,13 +1881,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020076000000699423
+      "latency_s": 0.0019424000001890818
     },
     {
-      "category": "Planner Decision",
+      "category": "Direct LLM",
       "test_id": "PLAN_LLM_03",
-      "question": "What is the difference between threads and processes in Python?",
-      "rewritten_question": "What is the difference between threads and processes in Python?",
+      "question": "Explain the difference between concurrency and parallelism.",
+      "rewritten_question": "Explain the difference between concurrency and parallelism.",
       "expected_source": "direct_llm",
       "actual_source": "direct_llm",
       "expected_tool": null,
@@ -1683,35 +1899,71 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0023069000017130747
+      "latency_s": 0.0019150000007357448
     },
     {
-      "category": "Planner Decision",
+      "category": "Direct LLM",
+      "test_id": "PLAN_LLM_04",
+      "question": "What is positional encoding in a transformer?",
+      "rewritten_question": "What is positional encoding in a transformer?",
+      "expected_source": "direct_llm",
+      "actual_source": "direct_llm",
+      "expected_tool": null,
+      "actual_tool": null,
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0018757999996523722
+    },
+    {
+      "category": "Direct LLM",
+      "test_id": "PLAN_LLM_05",
+      "question": "What is the difference between overfitting and underfitting?",
+      "rewritten_question": "What is the difference between overfitting and underfitting?",
+      "expected_source": "direct_llm",
+      "actual_source": "direct_llm",
+      "expected_tool": null,
+      "actual_tool": null,
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002014499999859254
+    },
+    {
+      "category": "Ambiguous/Negative",
       "test_id": "PLAN_AMB_01",
-      "question": "Convert 30 degrees Celsius to Fahrenheit.",
-      "rewritten_question": "Convert 30 degrees Celsius to Fahrenheit.",
+      "question": "Convert 18 miles per hour to kilometers per hour.",
+      "rewritten_question": "Convert 18 miles per hour to kilometers per hour.",
       "expected_source": "calculator",
-      "actual_source": "documents",
+      "actual_source": "calculator",
       "expected_tool": "calculator",
-      "actual_tool": "document_retrieval",
+      "actual_tool": "calculator",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
       "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=calculator, got ['documents']",
-      "latency_s": 2.64445490000071
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0017228999995495542
     },
     {
-      "category": "Planner Decision",
+      "category": "Ambiguous/Negative",
       "test_id": "PLAN_AMB_02",
-      "question": "What does climate mean?",
-      "rewritten_question": "What does climate mean?",
-      "expected_source": "direct_llm",
-      "actual_source": "direct_llm",
-      "expected_tool": null,
-      "actual_tool": null,
+      "question": "Calculate 23% of 960.",
+      "rewritten_question": "Calculate 23% of 960.",
+      "expected_source": "calculator",
+      "actual_source": "calculator",
+      "expected_tool": "calculator",
+      "actual_tool": "calculator",
       "tool_executed": false,
       "tool_result_present": false,
       "answer_present": false,
@@ -1719,31 +1971,13 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0026658999995561317
+      "latency_s": 0.0019997999997940497
     },
     {
-      "category": "Planner Decision",
+      "category": "Ambiguous/Negative",
       "test_id": "PLAN_AMB_03",
-      "question": "How does climate change affect weather patterns?",
-      "rewritten_question": "How does climate change affect weather patterns?",
-      "expected_source": "direct_llm",
-      "actual_source": "documents",
-      "expected_tool": null,
-      "actual_tool": "document_retrieval",
-      "tool_executed": false,
-      "tool_result_present": false,
-      "answer_present": false,
-      "document_retrieval_executed": false,
-      "passed": false,
-      "failure_type": "PLANNER",
-      "root_cause": "Expected source=direct_llm, got ['documents']",
-      "latency_s": 2.6465449999996054
-    },
-    {
-      "category": "Planner Decision",
-      "test_id": "PLAN_AMB_04",
-      "question": "What is the history of the Indian space programme?",
-      "rewritten_question": "What is the history of the Indian space programme?",
+      "question": "What does machine learning mean?",
+      "rewritten_question": "What does machine learning mean?",
       "expected_source": "direct_llm",
       "actual_source": "direct_llm",
       "expected_tool": null,
@@ -1755,13 +1989,49 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.00273399999969115
+      "latency_s": 0.0018019999997704872
     },
     {
-      "category": "Planner Decision",
+      "category": "Ambiguous/Negative",
+      "test_id": "PLAN_AMB_04",
+      "question": "How does an operating system manage processes?",
+      "rewritten_question": "How does an operating system manage processes?",
+      "expected_source": "direct_llm",
+      "actual_source": "direct_llm",
+      "expected_tool": null,
+      "actual_tool": null,
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002001599999857717
+    },
+    {
+      "category": "Ambiguous/Negative",
       "test_id": "PLAN_AMB_05",
-      "question": "What's the current temperature in Nagpur?",
-      "rewritten_question": "What's the current temperature in Nagpur?",
+      "question": "Who invented the World Wide Web?",
+      "rewritten_question": "Who invented the World Wide Web?",
+      "expected_source": "direct_llm",
+      "actual_source": "direct_llm",
+      "expected_tool": null,
+      "actual_tool": null,
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0019287999994048732
+    },
+    {
+      "category": "Ambiguous/Negative",
+      "test_id": "PLAN_AMB_06",
+      "question": "What's the current temperature in Nashik?",
+      "rewritten_question": "What's the current temperature in Nashik?",
       "expected_source": "tool",
       "actual_source": "tool",
       "expected_tool": "weather",
@@ -1773,13 +2043,31 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.002023400000325637
+      "latency_s": 0.0017109999998865533
     },
     {
-      "category": "Planner Decision",
-      "test_id": "PLAN_AMB_06",
-      "question": "What are the latest developments in multimodal AI?",
-      "rewritten_question": "What are the latest developments in multimodal AI?",
+      "category": "Ambiguous/Negative",
+      "test_id": "PLAN_AMB_07",
+      "question": "What is cosine similarity in machine learning?",
+      "rewritten_question": "What is cosine similarity in machine learning?",
+      "expected_source": "direct_llm",
+      "actual_source": "direct_llm",
+      "expected_tool": null,
+      "actual_tool": null,
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0019118000000162283
+    },
+    {
+      "category": "Ambiguous/Negative",
+      "test_id": "PLAN_AMB_08",
+      "question": "What are the latest developments in humanoid robotics?",
+      "rewritten_question": "What are the latest developments in humanoid robotics?",
       "expected_source": "web",
       "actual_source": "web",
       "expected_tool": "web_search",
@@ -1791,7 +2079,133 @@
       "passed": true,
       "failure_type": "",
       "root_cause": "",
-      "latency_s": 0.0020153999994363403
+      "latency_s": 0.0017397000001437846
+    },
+    {
+      "category": "Ambiguous/Negative",
+      "test_id": "PLAN_AMB_09",
+      "question": "Calculate the median of 11, 19, 27, 35 and 43.",
+      "rewritten_question": "Calculate the median of 11, 19, 27, 35 and 43.",
+      "expected_source": "calculator",
+      "actual_source": "calculator",
+      "expected_tool": "calculator",
+      "actual_tool": "calculator",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0017645999996602768
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_01",
+      "question": "What did the engineering team discuss in Slack about the RAG pipeline?",
+      "rewritten_question": "What did the engineering team discuss in Slack about the RAG pipeline?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0023561999996672967
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_02",
+      "question": "Find recent Slack messages mentioning the production deployment.",
+      "rewritten_question": "Find recent Slack messages mentioning the production deployment.",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001900000000205182
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_03",
+      "question": "What did the team say in Slack about the latest API bug?",
+      "rewritten_question": "What did the team say in Slack about the latest API bug?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.001948400000401307
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_04",
+      "question": "Search Slack for discussions about database connection failures.",
+      "rewritten_question": "Search Slack for discussions about database connection failures.",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0022342000002026907
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_05",
+      "question": "Did anyone mention the authentication issue in Slack?",
+      "rewritten_question": "Did anyone mention the authentication issue in Slack?",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.002160099999855447
+    },
+    {
+      "category": "Slack",
+      "test_id": "PLAN_SLACK_06",
+      "question": "Find the Slack conversation about the upcoming release.",
+      "rewritten_question": "Find the Slack conversation about the upcoming release.",
+      "expected_source": "tool",
+      "actual_source": "tool",
+      "expected_tool": "slack_search",
+      "actual_tool": "slack_search",
+      "tool_executed": false,
+      "tool_result_present": false,
+      "answer_present": false,
+      "document_retrieval_executed": false,
+      "passed": true,
+      "failure_type": "",
+      "root_cause": "",
+      "latency_s": 0.0020726000002468936
     }
   ]
 }

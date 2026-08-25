@@ -17,7 +17,8 @@
       "weather",
       "web_search",
       "sql_query",
-      null
+      null,
+      "slack_search"
     ],
     "evaluate": [
       "source selection",
@@ -27,7 +28,7 @@
       "intent classification"
     ]
   },
-  "test_count": 99,
+  "test_count": 122,
   "tests": [
     {
       "id": "L1_Q1",
@@ -1357,11 +1358,11 @@
     },
     {
       "id": "PLAN_CALC_01",
-      "question": "What is 2487 * 36 - 1295?",
+      "question": "What is 7392 * 14 + 865?",
       "expected_planner_decision": {
         "source": "calculator",
         "tool": "calculator",
-        "decision_type": "Pure arithmetic should use the calculator."
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
       },
       "must_not_select": [
         "documents",
@@ -1370,15 +1371,15 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
     },
     {
       "id": "PLAN_CALC_02",
-      "question": "A store has 480 products and sells 125. How many are left?",
+      "question": "Calculate 8750 / 25 - 18.",
       "expected_planner_decision": {
         "source": "calculator",
         "tool": "calculator",
-        "decision_type": "Arithmetic word problem should use the calculator."
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
       },
       "must_not_select": [
         "documents",
@@ -1387,15 +1388,15 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
     },
     {
       "id": "PLAN_CALC_03",
-      "question": "Convert 72 Fahrenheit to Celsius.",
+      "question": "What is 63 * 48 + 127?",
       "expected_planner_decision": {
         "source": "calculator",
         "tool": "calculator",
-        "decision_type": "Unit conversion is deterministic computation."
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
       },
       "must_not_select": [
         "documents",
@@ -1404,15 +1405,66 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
+    },
+    {
+      "id": "PLAN_CALC_04",
+      "question": "A warehouse has 725 boxes and ships 286. How many boxes remain?",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
+    },
+    {
+      "id": "PLAN_CALC_05",
+      "question": "What is 17.5% of 2400?",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
+    },
+    {
+      "id": "PLAN_CALC_06",
+      "question": "Convert 95 Fahrenheit to Celsius.",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Pure arithmetic or deterministic conversion should use the calculator."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Pure arithmetic or deterministic conversion should use the calculator."
     },
     {
       "id": "PLAN_WEATHER_01",
-      "question": "What is the current temperature in Hyderabad?",
+      "question": "What is the current temperature in Pune?",
       "expected_planner_decision": {
         "source": "tool",
         "tool": "weather",
-        "decision_type": "Current weather requires the weather tool."
+        "decision_type": "Current or forecast weather requires the weather tool."
       },
       "must_not_select": [
         "documents",
@@ -1421,15 +1473,15 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current or forecast weather requires the weather tool."
     },
     {
       "id": "PLAN_WEATHER_02",
-      "question": "Will it rain in Goa today?",
+      "question": "Is there rain in Surat right now?",
       "expected_planner_decision": {
         "source": "tool",
         "tool": "weather",
-        "decision_type": "Current/future weather requires live weather data."
+        "decision_type": "Current or forecast weather requires the weather tool."
       },
       "must_not_select": [
         "documents",
@@ -1438,15 +1490,15 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current or forecast weather requires the weather tool."
     },
     {
       "id": "PLAN_WEATHER_03",
-      "question": "What is the wind speed in Kochi today?",
+      "question": "What are the current weather conditions in Lucknow?",
       "expected_planner_decision": {
         "source": "tool",
         "tool": "weather",
-        "decision_type": "Live weather observation should not be answered from documents."
+        "decision_type": "Current or forecast weather requires the weather tool."
       },
       "must_not_select": [
         "documents",
@@ -1455,262 +1507,572 @@
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current or forecast weather requires the weather tool."
+    },
+    {
+      "id": "PLAN_WEATHER_04",
+      "question": "Is rain expected in Jaipur today?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current or forecast weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current or forecast weather requires the weather tool."
+    },
+    {
+      "id": "PLAN_WEATHER_05",
+      "question": "What is the current temperature in Patna?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current or forecast weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current or forecast weather requires the weather tool."
+    },
+    {
+      "id": "PLAN_WEATHER_06",
+      "question": "What's the forecast for Indore tomorrow?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current or forecast weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current or forecast weather requires the weather tool."
+    },
+    {
+      "id": "PLAN_WEATHER_07",
+      "question": "What is the humidity in Visakhapatnam right now?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current or forecast weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current or forecast weather requires the weather tool."
+    },
+    {
+      "id": "PLAN_WEATHER_08",
+      "question": "What is the wind speed in Bhopal today?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "weather",
+        "decision_type": "Current or forecast weather requires the weather tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current or forecast weather requires the weather tool."
     },
     {
       "id": "PLAN_WEB_01",
-      "question": "What are the latest developments in agentic AI this week?",
+      "question": "What are the latest developments in AI agents this week?",
       "expected_planner_decision": {
         "source": "web",
         "tool": "web_search",
-        "decision_type": "Latest external information requires web search."
+        "decision_type": "Current external information requires web search."
       },
       "must_not_select": [
         "documents",
-        "calculator",
         "weather",
+        "calculator",
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current external information requires web search."
     },
     {
       "id": "PLAN_WEB_02",
-      "question": "What is the current pricing for the OpenAI API?",
+      "question": "Which new foundation models were released recently?",
       "expected_planner_decision": {
         "source": "web",
         "tool": "web_search",
-        "decision_type": "Current external pricing requires web search."
+        "decision_type": "Current external information requires web search."
       },
       "must_not_select": [
         "documents",
-        "calculator",
         "weather",
+        "calculator",
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current external information requires web search."
     },
     {
       "id": "PLAN_WEB_03",
-      "question": "What are the latest AI model releases today?",
+      "question": "What is the current price of NVIDIA H100 GPUs?",
       "expected_planner_decision": {
         "source": "web",
         "tool": "web_search",
-        "decision_type": "Time-sensitive external information requires web search."
+        "decision_type": "Current external information requires web search."
       },
       "must_not_select": [
         "documents",
-        "calculator",
         "weather",
+        "calculator",
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current external information requires web search."
+    },
+    {
+      "id": "PLAN_WEB_04",
+      "question": "What are the latest breakthroughs in generative AI this month?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Current external information requires web search."
+      },
+      "must_not_select": [
+        "documents",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current external information requires web search."
+    },
+    {
+      "id": "PLAN_WEB_05",
+      "question": "What changed recently in the LangGraph ecosystem?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Current external information requires web search."
+      },
+      "must_not_select": [
+        "documents",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Current external information requires web search."
     },
     {
       "id": "PLAN_DB_01",
-      "question": "How many patient records are currently in the database?",
+      "question": "How many users are currently registered in the application?",
       "expected_planner_decision": {
         "source": "database",
         "tool": "sql_query",
-        "decision_type": "Question explicitly asks for current database state."
+        "decision_type": "Current application database state requires the database tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current application database state requires the database tool."
     },
     {
       "id": "PLAN_DB_02",
-      "question": "How many records are stored in the appointments table?",
+      "question": "How many chat sessions are currently stored?",
       "expected_planner_decision": {
         "source": "database",
         "tool": "sql_query",
-        "decision_type": "Question requires database execution."
+        "decision_type": "Current application database state requires the database tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current application database state requires the database tool."
     },
     {
       "id": "PLAN_DB_03",
-      "question": "How many notifications were created last month?",
+      "question": "How many uploaded documents are stored in the database?",
       "expected_planner_decision": {
         "source": "database",
         "tool": "sql_query",
-        "decision_type": "Historical database aggregation requires the database tool."
+        "decision_type": "Current application database state requires the database tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Current application database state requires the database tool."
+    },
+    {
+      "id": "PLAN_DB_04",
+      "question": "How many long-term memory records are stored?",
+      "expected_planner_decision": {
+        "source": "database",
+        "tool": "sql_query",
+        "decision_type": "Current application database state requires the database tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "direct_llm"
+      ],
+      "reason": "Current application database state requires the database tool."
+    },
+    {
+      "id": "PLAN_DB_05",
+      "question": "How many records are currently present in the users collection?",
+      "expected_planner_decision": {
+        "source": "database",
+        "tool": "sql_query",
+        "decision_type": "Current application database state requires the database tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "direct_llm"
+      ],
+      "reason": "Current application database state requires the database tool."
     },
     {
       "id": "PLAN_LLM_01",
-      "question": "What is vector search?",
+      "question": "What is cosine similarity in machine learning?",
       "expected_planner_decision": {
         "source": "direct_llm",
         "tool": null,
-        "decision_type": "General conceptual knowledge does not require an external source."
+        "decision_type": "General conceptual or technical explanation does not require an external tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "database"
       ],
-      "reason": ""
+      "reason": "General conceptual or technical explanation does not require an external tool."
     },
     {
       "id": "PLAN_LLM_02",
-      "question": "Explain dependency injection in software engineering.",
+      "question": "What is inversion of control in software design?",
       "expected_planner_decision": {
         "source": "direct_llm",
         "tool": null,
-        "decision_type": "General software explanation should use the direct LLM."
+        "decision_type": "General conceptual or technical explanation does not require an external tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "database"
       ],
-      "reason": ""
+      "reason": "General conceptual or technical explanation does not require an external tool."
     },
     {
       "id": "PLAN_LLM_03",
-      "question": "What is the difference between threads and processes in Python?",
+      "question": "Explain the difference between concurrency and parallelism.",
       "expected_planner_decision": {
         "source": "direct_llm",
         "tool": null,
-        "decision_type": "General technical explanation does not require retrieval."
+        "decision_type": "General conceptual or technical explanation does not require an external tool."
       },
       "must_not_select": [
         "documents",
-        "calculator",
-        "weather",
         "web",
+        "weather",
+        "calculator",
         "database"
       ],
-      "reason": ""
+      "reason": "General conceptual or technical explanation does not require an external tool."
+    },
+    {
+      "id": "PLAN_LLM_04",
+      "question": "What is positional encoding in a transformer?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General conceptual or technical explanation does not require an external tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database"
+      ],
+      "reason": "General conceptual or technical explanation does not require an external tool."
+    },
+    {
+      "id": "PLAN_LLM_05",
+      "question": "What is the difference between overfitting and underfitting?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "General conceptual or technical explanation does not require an external tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database"
+      ],
+      "reason": "General conceptual or technical explanation does not require an external tool."
     },
     {
       "id": "PLAN_AMB_01",
-      "question": "Convert 30 degrees Celsius to Fahrenheit.",
+      "question": "Convert 18 miles per hour to kilometers per hour.",
       "expected_planner_decision": {
         "source": "calculator",
         "tool": "calculator",
-        "decision_type": "Temperature unit conversion is calculation, not weather."
+        "decision_type": "Ambiguous/negative routing case."
       },
       "must_not_select": [
-        "weather",
-        "documents",
-        "web",
-        "database",
-        "direct_llm"
+        "weather"
       ],
-      "reason": ""
+      "reason": "Ambiguous/negative routing case."
     },
     {
       "id": "PLAN_AMB_02",
-      "question": "What does climate mean?",
+      "question": "Calculate 23% of 960.",
       "expected_planner_decision": {
-        "source": "direct_llm",
-        "tool": null,
-        "decision_type": "Definition of climate is general knowledge, not current weather."
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Ambiguous/negative routing case."
       },
       "must_not_select": [
-        "weather",
-        "documents",
-        "web",
-        "calculator",
-        "database"
+        "direct_llm"
       ],
-      "reason": ""
+      "reason": "Ambiguous/negative routing case."
     },
     {
       "id": "PLAN_AMB_03",
-      "question": "How does climate change affect weather patterns?",
+      "question": "What does machine learning mean?",
       "expected_planner_decision": {
         "source": "direct_llm",
         "tool": null,
-        "decision_type": "General explanatory question; no live data requested."
+        "decision_type": "Ambiguous/negative routing case."
       },
       "must_not_select": [
-        "weather",
-        "documents",
-        "web",
-        "calculator",
-        "database"
+        "tool"
       ],
-      "reason": ""
+      "reason": "Ambiguous/negative routing case."
     },
     {
       "id": "PLAN_AMB_04",
-      "question": "What is the history of the Indian space programme?",
+      "question": "How does an operating system manage processes?",
       "expected_planner_decision": {
         "source": "direct_llm",
         "tool": null,
-        "decision_type": "Historical/general knowledge question; no current information requested."
+        "decision_type": "Ambiguous/negative routing case."
       },
       "must_not_select": [
-        "web",
-        "documents",
-        "weather",
-        "calculator",
-        "database"
+        "tool"
       ],
-      "reason": ""
+      "reason": "Ambiguous/negative routing case."
     },
     {
       "id": "PLAN_AMB_05",
-      "question": "What's the current temperature in Nagpur?",
+      "question": "Who invented the World Wide Web?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "Ambiguous/negative routing case."
+      },
+      "must_not_select": [
+        "web"
+      ],
+      "reason": "Ambiguous/negative routing case."
+    },
+    {
+      "id": "PLAN_AMB_06",
+      "question": "What's the current temperature in Nashik?",
       "expected_planner_decision": {
         "source": "tool",
         "tool": "weather",
-        "decision_type": "The word 'current' makes this a live weather request."
+        "decision_type": "Ambiguous/negative routing case."
       },
       "must_not_select": [
-        "web",
+        "web"
+      ],
+      "reason": "Ambiguous/negative routing case."
+    },
+    {
+      "id": "PLAN_AMB_07",
+      "question": "What is cosine similarity in machine learning?",
+      "expected_planner_decision": {
+        "source": "direct_llm",
+        "tool": null,
+        "decision_type": "Ambiguous/negative routing case."
+      },
+      "must_not_select": [
+        "documents"
+      ],
+      "reason": "Ambiguous/negative routing case."
+    },
+    {
+      "id": "PLAN_AMB_08",
+      "question": "What are the latest developments in humanoid robotics?",
+      "expected_planner_decision": {
+        "source": "web",
+        "tool": "web_search",
+        "decision_type": "Ambiguous/negative routing case."
+      },
+      "must_not_select": [
+        "direct_llm"
+      ],
+      "reason": "Ambiguous/negative routing case."
+    },
+    {
+      "id": "PLAN_AMB_09",
+      "question": "Calculate the median of 11, 19, 27, 35 and 43.",
+      "expected_planner_decision": {
+        "source": "calculator",
+        "tool": "calculator",
+        "decision_type": "Ambiguous/negative routing case."
+      },
+      "must_not_select": [
+        "weather"
+      ],
+      "reason": "Ambiguous/negative routing case."
+    },
+    {
+      "id": "PLAN_SLACK_01",
+      "question": "What did the engineering team discuss in Slack about the RAG pipeline?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
+      },
+      "must_not_select": [
         "documents",
+        "web",
+        "weather",
         "calculator",
         "database",
         "direct_llm"
       ],
-      "reason": ""
+      "reason": "Internal Slack information requires the Slack search tool."
     },
     {
-      "id": "PLAN_AMB_06",
-      "question": "What are the latest developments in multimodal AI?",
+      "id": "PLAN_SLACK_02",
+      "question": "Find recent Slack messages mentioning the production deployment.",
       "expected_planner_decision": {
-        "source": "web",
-        "tool": "web_search",
-        "decision_type": "Latest developments require current external information."
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
       },
       "must_not_select": [
-        "direct_llm",
         "documents",
+        "web",
         "weather",
         "calculator",
-        "database"
+        "database",
+        "direct_llm"
       ],
-      "reason": ""
+      "reason": "Internal Slack information requires the Slack search tool."
+    },
+    {
+      "id": "PLAN_SLACK_03",
+      "question": "What did the team say in Slack about the latest API bug?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Internal Slack information requires the Slack search tool."
+    },
+    {
+      "id": "PLAN_SLACK_04",
+      "question": "Search Slack for discussions about database connection failures.",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Internal Slack information requires the Slack search tool."
+    },
+    {
+      "id": "PLAN_SLACK_05",
+      "question": "Did anyone mention the authentication issue in Slack?",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Internal Slack information requires the Slack search tool."
+    },
+    {
+      "id": "PLAN_SLACK_06",
+      "question": "Find the Slack conversation about the upcoming release.",
+      "expected_planner_decision": {
+        "source": "tool",
+        "tool": "slack_search",
+        "decision_type": "Internal Slack information requires the Slack search tool."
+      },
+      "must_not_select": [
+        "documents",
+        "web",
+        "weather",
+        "calculator",
+        "database",
+        "direct_llm"
+      ],
+      "reason": "Internal Slack information requires the Slack search tool."
     }
   ]
 }
