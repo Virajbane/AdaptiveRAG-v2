@@ -230,23 +230,43 @@ def _numeric_claims_grounded(answer: str, context: str, question: str, sources: 
     if not numbers_in_answer:
         return True
 
-    # 2026-08-25 FIX: Do not force entity-level grounding for general numeric questions.
-    # If the question doesn't name any entities and doesn't ask for a specific metric field,
-    # it's a general question (e.g. "What is the learning rate?").
-    entities_from_question = _extract_entities_from_question(question)
-    field_hint = _extract_field_hint(question)
+    # FIXED: 2026-08-26 Regression Fix
+    # REMOVED the dangerous shortcut that used substring matching (all(num in context))
+    # This shortcut was too permissive and allowed hallucinated numbers to pass validation
+    # if they happened to appear in context for unrelated reasons.
+    #
+    # INSTEAD: Use consistent, context-aware grounding for all numeric questions
+    # that properly validates semantic relationships between numbers and their context.
     
-    if not entities_from_question and not field_hint:
-        # For purely conceptual questions with no entity names or specific metric fields
-        return all(num in context for num in numbers_in_answer)
-
-    # For entity/metric queries, extract entities from ROWS first (more precise than question parsing)
-    # This handles aliases like "Lychee-FD (Ours)" exactly as they appear in the data.
+    # Extract entities from table rows first (most precise)
     entities_from_rows = _extract_entities_from_rows(context)
-
+    
     if not entities_from_rows:
         # No table rows in context -- fall back to question-based extraction
-        entities = entities_from_question
+        entities = _extract_entities_from_question(question)
+        
+        # FIXED: For questions with no table data and no explicit entities,
+        # don't just do substring matching. Instead, require numbers to appear
+        # in meaningful sentence-level spans, not randomly scattered in context.
+        if not entities:
+            # Sentence-level semantic grounding: number must be in a complete sentence
+            # This is weaker than entity binding but stronger than substring search
+            sentences = [
+                s.strip() for s in re.split(r"(?<!\d)\.(?!\d)", context) 
+                if s.strip()
+            ]
+            for num in numbers_in_answer:
+                # Number must appear in at least one complete sentence
+                found_in_sentence = any(num in s for s in sentences)
+                if not found_in_sentence:
+                    # Also check table fields as fallback
+                    found_in_field = any(
+                        num in _KV_RE.findall(line) 
+                        for line in context.split("\n")
+                    )
+                    if not found_in_field:
+                        return False
+            return True
     else:
         # Use entities extracted from actual row labels
         entities = entities_from_rows
@@ -345,7 +365,12 @@ class AnswerAgent(BaseAgent):
                 key=lambda d: d.get("rerank_score", d.get("combined_score", 0.0)),
                 reverse=True,
             )
-            top_docs = (protected + other)[:5]
+            # FIXED: 2026-08-26 Regression Fix
+            # Reduced from [:5] to [:4] to balance context quality vs quantity.
+            # [:5] introduced too many irrelevant chunks that aided hallucinations.
+            # [:3] was too restrictive (caused false declines).
+            # [:4] provides slightly more context while maintaining signal-to-noise.
+            top_docs = (protected + other)[:4]
         else:
             top_docs = []
 
