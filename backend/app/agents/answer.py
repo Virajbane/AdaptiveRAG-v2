@@ -24,7 +24,21 @@ BUDGET_SAFETY_MARGIN_TOKENS = 50
 # claims to verify, they're part of a proper noun. Confirmed root cause
 # of a false-decline: "StepAudio-2-mini" (a correct answer) was rejected
 # because the embedded "2" was treated as an unverified numeric claim.
-_NUM_RE = re.compile(r'(?<![A-Za-z0-9-])\d+(?:\.\d+)?%?(?![A-Za-z0-9-])')
+# Scientific notation (3e-6) is a real training-hyperparameter claim.
+_NUM_RE = re.compile(
+    r'(?<![A-Za-z0-9-])[-−]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?%?(?![A-Za-z0-9-])'
+)
+
+# "Table 1" / "Equation 6" / "Figure 2a" are citations, not numeric claims.
+# Treating them as claims was a confirmed false-decline source (L4_Q16:
+# a correct "Om is output logits" answer was rejected because of the "6").
+_STRUCTURAL_REF_RE = re.compile(
+    r'\b(?:'
+    r'figures?|fig\.?|tables?|tbl\.?|equations?|eq\.?|'
+    r'sections?|sec\.?|appendi(?:x|ces)|sources?|pages?|chapters?'
+    r')\s*[A-Z]?\d+(?:\.\d+)?[a-z]?\b',
+    re.IGNORECASE,
+)
 
 # 2026-08-04 fix (Q16 root cause): matches a single "label=value" table
 # field, e.g. "FullDuplexBench 1.5.Lat. ↓=826" as produced by
@@ -55,21 +69,78 @@ _QUESTION_STOPWORDS = {
 # to the correct entity, but to the correct field (e.g., "S→S" vs "S→T").
 _FIELD_HINT_RE = re.compile(
     r"\b(s\s*[-→>]+\s*s|s\s*[-→>]+\s*t|utmos|bleu|rouge|f1|accuracy|precision|"
-    r"recall|latency|lat\.|stop\.|wer|srr|sir)\b", re.IGNORECASE
+    r"recall|latency|lat\.|stop\.|wer|srr|sir|irr|tor)\b", re.IGNORECASE
 )
 
+_FIELD_ALIASES = {
+    "s->s": ("s->s", "s-s", "s2s"),
+    "s->t": ("s->t", "s-t", "s2t"),
+    "latency": ("latency", "lat.", "lat", "stop.", "stop"),
+    "lat.": ("latency", "lat.", "lat", "stop.", "stop"),
+    "stop.": ("stop.", "stop", "latency", "lat."),
+    "tor": ("tor", "takeover"),
+    "srr": ("srr",),
+    "sir": ("sir",),
+    "irr": ("irr",),
+    "wer": ("wer",),
+    "utmos": ("utmos",),
+}
 
-def _extract_field_hint(question: str) -> str | None:
-    """
-    Extract the metric/field name from the question (e.g., "S→S", "UTMOS").
-    Used in _numeric_claims_grounded to enforce that numeric claims are
-    attributed to the correct field, not just the correct entity.
 
-    Returns:
-        The matched field hint (normalized to remove spaces), or None
-    """
-    m = _FIELD_HINT_RE.search(question)
-    return m.group(0).replace(" ", "") if m else None
+def _normalize_field_token(text: str) -> str:
+    return (
+        text.lower()
+        .replace(" ", "")
+        .replace("→", "->")
+        .replace(">", "->")
+    )
+
+
+def _extract_field_hints(question: str) -> list[str]:
+    """All metric/field names mentioned in the question, normalized."""
+    hints = []
+    for m in _FIELD_HINT_RE.finditer(question or ""):
+        hints.append(_normalize_field_token(m.group(0)))
+    return hints
+
+
+def _field_in_span(span: str, hint: str) -> bool:
+    nspan = _normalize_field_token(span)
+    hint = _normalize_field_token(hint)
+    for alias in _FIELD_ALIASES.get(hint, (hint,)):
+        if _normalize_field_token(alias) in nspan:
+            return True
+    return hint in nspan
+
+
+def _strip_structural_numeric_refs(text: str) -> str:
+    return _STRUCTURAL_REF_RE.sub(" ", text or "")
+
+
+def _normalize_num_token(token: str) -> str:
+    t = (token or "").replace("−", "-").replace("%", "").replace(",", "").strip()
+    try:
+        return f"{float(t):.10g}"
+    except ValueError:
+        return t
+
+
+def _span_has_number(span: str, num: str) -> bool:
+    """True if `num` appears in `span`, allowing % / 4.50 vs 4.5 / 3e-6."""
+    if not span or not num:
+        return False
+    if num in span:
+        return True
+    bare = num.replace("−", "-").rstrip("%")
+    if bare != num and bare in span:
+        return True
+    if not num.endswith("%") and f"{bare}%" in span:
+        return True
+    target = _normalize_num_token(num)
+    for m in _NUM_RE.findall(span):
+        if _normalize_num_token(m) == target:
+            return True
+    return False
 
 
 # 2026-08-09 FIX: Each tool result type gets a formatter so AnswerAgent
@@ -310,10 +381,10 @@ def _numeric_claims_grounded(answer: str, context: str, question: str, sources: 
         # 2026-08-10 FIX: Also check field name if present in question
         # This prevents accepting a number that's attributed to the right entity
         # but the wrong field (e.g., 84.1 for Lychee-FD S→T when asked for S→S)
-        field_hint = _extract_field_hint(question)
-        if field_hint and num_is_attributed:
+        field_hints = _extract_field_hints(question)
+        if field_hints and num_is_attributed:
             num_is_attributed = any(
-                field_hint.lower() in s.lower().replace(" ", "")
+                any(_field_in_span(s, hint) for hint in field_hints)
                 for s in spans_with_num if any(e.lower() in s.lower() for e in entities)
             )
 
