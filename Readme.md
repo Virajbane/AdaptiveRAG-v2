@@ -98,6 +98,22 @@ ollama --version
           └───────────────┘
 ```
 
+### Detailed architecture diagrams
+
+The diagrams below show the full system, the background document-ingestion path, and the agent-query workflow in more detail.
+
+#### System overview
+
+![Adaptive RAG 2.0 system architecture](docs/images/system-architecture.png)
+
+#### Document ingestion pipeline
+
+![Document ingestion pipeline](docs/images/document-ingestion-pipeline.png)
+
+#### Agent orchestration flow
+
+![LangGraph agent orchestration flow](docs/images/agent-orchestration-flow.png)
+
 ### What each service does
 
 | Service | Role | Runs in Docker? |
